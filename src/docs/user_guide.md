@@ -1,17 +1,28 @@
-# Rubric Grading Tool - User Guide
-
-This comprehensive guide will help you get started with the Rubric Grading Tool and make the most of its features.
+# Comprehensive User Guide: Rubric Grading Tool
 
 ## Table of Contents
-
 1. [Introduction](#introduction)
 2. [Getting Started](#getting-started)
+   - [Installation](#installation)
+   - [Interface Overview](#interface-overview)
 3. [Working with Rubrics](#working-with-rubrics)
+   - [Rubric Structure](#rubric-structure)
+   - [Creating Rubrics](#creating-rubrics)
+   - [Loading a Rubric](#loading-a-rubric)
+   - [Converting Between Formats](#converting-between-formats)
 4. [Grading Assignments](#grading-assignments)
+   - [Basic Grading](#basic-grading)
+   - [Using Achievement Levels](#using-achievement-levels)
+   - [Adding Comments](#adding-comments)
 5. [Saving and Loading Assessments](#saving-and-loading-assessments)
 6. [Exporting to PDF](#exporting-to-pdf)
 7. [Tips and Best Practices](#tips-and-best-practices)
+   - [Efficient Grading](#efficient-grading)
+   - [Managing Multiple Assessments](#managing-multiple-assessments)
+   - [Designing Effective Rubrics](#designing-effective-rubrics)
 8. [Troubleshooting](#troubleshooting)
+   - [Common Issues](#common-issues)
+   - [Getting Help](#getting-help)
 
 ## Introduction
 
@@ -48,11 +59,61 @@ The main application window is divided into several sections:
 
 ## Working with Rubrics
 
+### Rubric Structure
+
+Every standardized rubric follows this JSON structure:
+
+```json
+{
+  "title": "Assignment Title",
+  "criteria": [
+    {
+      "title": "Question/Criterion Title",
+      "description": "Description of what is being evaluated",
+      "points": 10,
+      "levels": [
+        {
+          "title": "Level Title (with point range)",
+          "description": "Detailed description of this level",
+          "points": 10
+        },
+        // Additional levels...
+      ]
+    },
+    // Additional criteria/questions...
+  ],
+  "totalPoints": 100
+}
+```
+
+Key components include:
+
+1. **Title**: The assignment title that appears at the top of the grading form and exported PDF
+2. **Criteria Array**: Collection of objects representing each question or criterion
+3. **Individual Criterion**:
+   - **title**: Name or number of the question/criterion
+   - **description**: Detailed explanation of what is being evaluated
+   - **points**: Maximum points possible for this criterion
+   - **levels**: Array of achievement levels
+4. **Achievement Levels**:
+   - **title**: Name of the level with point range in parentheses (e.g., "Excellent (8-10 pts)")
+   - **description**: Detailed description of what constitutes this level of achievement
+   - **points**: Maximum point value for this level
+5. **Total Points**: Sum of maximum points for all criteria
+
 ### Creating Rubrics
 
-Rubrics can be created in either JSON or CSV format. For detailed specifications, see [Rubric Format](rubric_format.md).
+Rubrics can be created in either JSON or CSV format. To create a new rubric:
 
-You can also use the included template generator to create new rubrics:
+1. Start with the template and customize it for your assignment
+2. Add all questions/criteria with their respective point values
+3. For each criterion, define achievement levels with clear descriptions
+4. Include the point range in each level title for clarity
+5. Set the points value for each level to the maximum of its range
+6. Calculate and set the totalPoints value
+7. Save the file with a .json extension
+
+You can also use the included template generator:
 
 ```bash
 python tools/rubric_template.py essay my_essay_rubric.json --title "Literary Analysis Essay"
@@ -137,24 +198,26 @@ For each criterion, you can add detailed comments in the text area provided. The
 - Create a separate directory for each assignment
 - Consider using the student name and assignment in the filename
 
-### Customizing Rubrics
+### Designing Effective Rubrics
 
-- Start with one of the provided templates
-- Adjust criteria weights to match assignment priorities
-- Include clear descriptions for achievement levels
-- Test your rubric with sample assessments
+1. **Include Point Ranges in Level Titles**: Add the point range in parentheses after the level title (e.g., "Excellent (8-10 pts)")
+2. **Use Consistent Level Names**: Maintain consistent achievement level names across criteria
+3. **Provide Detailed Descriptions**: Include specific, actionable descriptions for each achievement level
+4. **Verify Point Totals**: Ensure the sum of maximum points matches the totalPoints value
+5. **Use Simple Language**: Keep criteria and level descriptions clear and straightforward
+6. **Test Your Rubric**: Load the rubric into the application before using it for grading
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Problem**: Rubric fails to load
+**Problem**: Rubric fails to load  
 **Solution**: Ensure the file is in the correct JSON or CSV format
 
-**Problem**: Assessment won't load
+**Problem**: Assessment won't load  
 **Solution**: Make sure you have the same rubric loaded that was used to create the assessment
 
-**Problem**: PDF export fails
+**Problem**: PDF export fails  
 **Solution**: Check that you have the required permissions to write to the selected directory
 
 ### Getting Help

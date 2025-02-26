@@ -1,0 +1,87 @@
+# PyCharm and other JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Generated artifacts
+*.pdf
+*.log
+
+# Temporary files
+tmp/
+temp/
+.DS_Store
+Thumbs.db
+
+# User-specific files
+*.backup
+*.bak
+*.swp
+*.user
+*.orig
+
+# Application-specific files
+# Add patterns for files specific to your app that shouldn't be tracked
+saved_assessments/
