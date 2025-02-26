@@ -10,7 +10,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 import datetime
 
-
 def generate_assessment_pdf(file_path, assessment_data):
     """
     Generate a PDF report for an assessment.
@@ -27,7 +26,7 @@ def generate_assessment_pdf(file_path, assessment_data):
 
     # Create custom styles
     styles.add(ParagraphStyle(
-        name='Title',
+        name='CustomTitle',
         parent=styles['Heading1'],
         alignment=1,  # Center alignment
         spaceAfter=12
@@ -51,7 +50,7 @@ def generate_assessment_pdf(file_path, assessment_data):
 
     # Header information
     title = assessment_data.get("assignment_name", "Assessment")
-    content.append(Paragraph(title, styles['Title']))
+    content.append(Paragraph(title, styles['CustomTitle']))
 
     student_name = assessment_data.get("student_name", "")
     if student_name:

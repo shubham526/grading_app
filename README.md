@@ -66,7 +66,7 @@ A professional, cross-platform desktop application for educators to efficiently 
 
 ## Rubric Format
 
-For details on the supported rubric formats, see [docs/rubric_format.md](docs/rubric_format.md).
+For details on the supported rubric formats, see [here](https://github.com/shubham526/grading_app/blob/main/src/docs/rubric_format.md).
 
 ## License
 
