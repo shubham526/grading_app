@@ -1,0 +1,166 @@
+{
+  "title": "Information Retrieval System Assignment",
+  "description": "Final project for Information Retrieval course",
+  "criteria": [
+    {
+      "title": "System Implementation",
+      "description": "Quality of search engine implementation",
+      "points": 30,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Fully functional implementation with advanced features",
+          "points": 30
+        },
+        {
+          "title": "Good",
+          "description": "Working implementation with all basic features",
+          "points": 24
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Basic implementation with some limitations",
+          "points": 18
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Minimal implementation with significant issues",
+          "points": 12
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Incomplete or non-functional implementation",
+          "points": 6
+        }
+      ]
+    },
+    {
+      "title": "Indexing Strategy",
+      "description": "Effectiveness of the indexing approach",
+      "points": 20,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Optimized indexing with advanced techniques",
+          "points": 20
+        },
+        {
+          "title": "Good",
+          "description": "Effective indexing with good performance",
+          "points": 16
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Basic indexing with acceptable performance",
+          "points": 12
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Simple indexing with performance issues",
+          "points": 8
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Ineffective or incomplete indexing",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "title": "Query Processing",
+      "description": "Handling of user queries and relevance",
+      "points": 20,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Advanced query processing with optimizations",
+          "points": 20
+        },
+        {
+          "title": "Good",
+          "description": "Effective query processing with good results",
+          "points": 16
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Basic query processing with acceptable results",
+          "points": 12
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Simple query processing with limited results",
+          "points": 8
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Poor query handling with irrelevant results",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "title": "Evaluation",
+      "description": "Analysis of system performance using metrics",
+      "points": 15,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Comprehensive evaluation with multiple metrics",
+          "points": 15
+        },
+        {
+          "title": "Good",
+          "description": "Thorough evaluation with standard metrics",
+          "points": 12
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Basic evaluation with some metrics",
+          "points": 9
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Limited evaluation with few metrics",
+          "points": 6
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Minimal or missing evaluation",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "title": "Documentation",
+      "description": "Quality and completeness of documentation",
+      "points": 15,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Comprehensive, clear, and well-structured documentation",
+          "points": 15
+        },
+        {
+          "title": "Good",
+          "description": "Thorough documentation with good organization",
+          "points": 12
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Adequate documentation covering main aspects",
+          "points": 9
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Basic documentation with gaps or clarity issues",
+          "points": 6
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Minimal or poor-quality documentation",
+          "points": 3
+        }
+      ]
+    }
+  ]
+}

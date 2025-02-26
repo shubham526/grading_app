@@ -1,0 +1,198 @@
+{
+  "title": "Argumentative Essay Assignment",
+  "description": "5-page argumentative essay on a topic of your choice",
+  "criteria": [
+    {
+      "title": "Thesis Statement",
+      "description": "Clear, arguable thesis that establishes the purpose of the essay",
+      "points": 10,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Thesis is clear, specific, and arguable; effectively establishes the purpose",
+          "points": 10
+        },
+        {
+          "title": "Good",
+          "description": "Thesis is clear and arguable but could be more specific",
+          "points": 8
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Thesis is present but lacks clarity or is too broad",
+          "points": 6
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Thesis is vague or difficult to identify",
+          "points": 4
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "No discernible thesis statement",
+          "points": 2
+        }
+      ]
+    },
+    {
+      "title": "Organization & Structure",
+      "description": "Logical organization with clear introduction, body, and conclusion",
+      "points": 20,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Flawless organization with compelling intro/conclusion and logical flow",
+          "points": 20
+        },
+        {
+          "title": "Good",
+          "description": "Well-organized with clear intro/conclusion and good transitions",
+          "points": 16
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Generally organized but with some structural weaknesses",
+          "points": 12
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Disorganized in several areas, affecting readability",
+          "points": 8
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Lacks logical organization throughout",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "title": "Evidence & Support",
+      "description": "Use of credible sources and evidence to support arguments",
+      "points": 25,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Comprehensive, relevant evidence from credible sources throughout",
+          "points": 25
+        },
+        {
+          "title": "Good",
+          "description": "Strong evidence from credible sources with minor gaps",
+          "points": 20
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Adequate evidence but needs more depth or credibility",
+          "points": 15
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Limited or questionable evidence with significant gaps",
+          "points": 10
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Little to no credible evidence to support arguments",
+          "points": 5
+        }
+      ]
+    },
+    {
+      "title": "Analysis & Critical Thinking",
+      "description": "Depth of analysis and critical engagement with the topic",
+      "points": 25,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Sophisticated analysis showing exceptional critical thinking",
+          "points": 25
+        },
+        {
+          "title": "Good",
+          "description": "Strong analysis with good critical engagement",
+          "points": 20
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Basic analysis with some critical thinking",
+          "points": 15
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Limited analysis with minimal critical thinking",
+          "points": 10
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Superficial treatment with no meaningful analysis",
+          "points": 5
+        }
+      ]
+    },
+    {
+      "title": "Grammar & Mechanics",
+      "description": "Correct grammar, punctuation, spelling, and formatting",
+      "points": 10,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Error-free writing with polished mechanics",
+          "points": 10
+        },
+        {
+          "title": "Good",
+          "description": "Few minor errors that don't interfere with meaning",
+          "points": 8
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Several errors but meaning remains clear",
+          "points": 6
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Numerous errors that sometimes obscure meaning",
+          "points": 4
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Pervasive errors that significantly impede understanding",
+          "points": 2
+        }
+      ]
+    },
+    {
+      "title": "Style & Voice",
+      "description": "Appropriate academic tone and effective writing style",
+      "points": 10,
+      "levels": [
+        {
+          "title": "Excellent",
+          "description": "Sophisticated academic voice with engaging, effective style",
+          "points": 10
+        },
+        {
+          "title": "Good",
+          "description": "Consistent academic voice with strong style",
+          "points": 8
+        },
+        {
+          "title": "Satisfactory",
+          "description": "Generally appropriate tone with satisfactory style",
+          "points": 6
+        },
+        {
+          "title": "Needs Improvement",
+          "description": "Inconsistent tone or underdeveloped style",
+          "points": 4
+        },
+        {
+          "title": "Unsatisfactory",
+          "description": "Inappropriate tone with ineffective style",
+          "points": 2
+        }
+      ]
+    }
+  ]
+}
