@@ -1,139 +1,266 @@
-"""
-PDF Generator for the Rubric Grading Tool.
+# utils/pdf_generator.py
 
-This module provides functionality to generate PDF reports from assessment data.
-"""
+def extract_question_number(title):
+    """Extract the main question number from a criterion title."""
+    if not title.startswith("Question "):
+        return None
+        
+    # Remove "Question " prefix
+    question_id = title.split(":")[0].replace("Question ", "").strip()
+    
+    # Extract main number (1 from "1a", "1b", etc.)
+    if len(question_id) > 1 and question_id[1].isalpha():
+        return question_id[0]
+    
+    # Handle other formats
+    for i, char in enumerate(question_id):
+        if not char.isdigit():
+            if i > 0:
+                return question_id[:i]
+            break
+            
+    return question_id
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
-import datetime
+
+def get_letter_grade(percentage):
+    """Return a letter grade based on percentage."""
+    if percentage >= 90:
+        return "A"
+    elif percentage >= 80:
+        return "B"
+    elif percentage >= 70:
+        return "C"
+    elif percentage >= 60:
+        return "D"
+    else:
+        return "F"
+
 
 def generate_assessment_pdf(file_path, assessment_data):
-    """
-    Generate a PDF report for an assessment.
-
-    Args:
-        file_path (str): Path where to save the PDF
-        assessment_data (dict): Assessment data dictionary
-
-    Returns:
-        None
-    """
-    doc = SimpleDocTemplate(file_path, pagesize=letter)
-    styles = getSampleStyleSheet()
-
-    # Create custom styles
-    styles.add(ParagraphStyle(
-        name='CustomTitle',
-        parent=styles['Heading1'],
-        alignment=1,  # Center alignment
-        spaceAfter=12
-    ))
-
-    styles.add(ParagraphStyle(
-        name='CriterionTitle',
-        parent=styles['Heading2'],
-        fontSize=12,
-        spaceAfter=6
-    ))
-
-    styles.add(ParagraphStyle(
-        name='Normal_Justified',
-        parent=styles['Normal'],
-        alignment=4  # Justified
-    ))
-
-    # Build content
-    content = []
-
-    # Header information
-    title = assessment_data.get("assignment_name", "Assessment")
-    content.append(Paragraph(title, styles['CustomTitle']))
-
-    student_name = assessment_data.get("student_name", "")
-    if student_name:
-        content.append(Paragraph(f"Student: {student_name}", styles['Normal']))
-
-    # Add date
-    current_date = datetime.datetime.now().strftime("%B %d, %Y")
-    content.append(Paragraph(f"Date: {current_date}", styles['Normal']))
-
-    # Add score
-    percentage = assessment_data.get("percentage", 0)
-    total_awarded = assessment_data.get("total_awarded", 0)
-    total_possible = assessment_data.get("total_possible", 0)
-
-    # Create score table
-    score_data = [
-        ["Score", f"{total_awarded} / {total_possible}"],
-        ["Percentage", f"{percentage:.1f}%"]
-    ]
-
-    # Determine grade based on percentage
-    grade = ""
-    if percentage >= 90:
-        grade = "A"
-    elif percentage >= 80:
-        grade = "B"
-    elif percentage >= 70:
-        grade = "C"
-    elif percentage >= 60:
-        grade = "D"
-    else:
-        grade = "F"
-
-    score_data.append(["Grade", grade])
-
-    score_table = Table(score_data, colWidths=[100, 100])
-    score_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-    ]))
-
-    content.append(Spacer(1, 12))
-    content.append(score_table)
-    content.append(Spacer(1, 20))
-
-    # Summary heading
-    content.append(Paragraph("Assessment Summary", styles['Heading2']))
-    content.append(Spacer(1, 6))
-
-    # Add each criterion
-    for criterion in assessment_data.get("criteria", []):
-        # Criterion title
-        content.append(Paragraph(criterion.get("title", ""), styles['CriterionTitle']))
-
-        # Points
-        points_awarded = criterion.get("points_awarded", 0)
-        points_possible = criterion.get("points_possible", 0)
-        content.append(Paragraph(f"Points: {points_awarded} / {points_possible}", styles['Normal']))
-
-        # Selected level if any
-        selected_level = criterion.get("selected_level", "")
-        if selected_level:
-            content.append(Paragraph(f"Achievement level: {selected_level}", styles['Normal']))
-
-        # Comments if any
-        comments = criterion.get("comments", "")
-        if comments:
-            content.append(Paragraph("Comments:", styles['Normal']))
-            content.append(Paragraph(comments, styles['Normal_Justified']))
-
-        content.append(Spacer(1, 12))
-
-    # Add footer with page numbers
-    def add_page_number(canvas, doc):
-        canvas.saveState()
-        canvas.setFont('Helvetica', 9)
-        page_num = canvas.getPageNumber()
-        text = f"Page {page_num}"
-        canvas.drawRightString(letter[0] - 30, 30, text)
-        canvas.restoreState()
-
-    # Build the PDF
-    doc.build(content, onFirstPage=add_page_number, onLaterPages=add_page_number)
+    """Generate a PDF report of the assessment."""
+    try:
+        # Import reportlab for PDF generation
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(file_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+        
+        # Create custom styles
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Heading1'],
+            fontSize=16,
+            alignment=1,  # Center
+            spaceAfter=12
+        )
+        
+        heading_style = ParagraphStyle(
+            'Heading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=6
+        )
+        
+        subheading_style = ParagraphStyle(
+            'Subheading',
+            parent=styles['Heading3'],
+            fontSize=12,
+            spaceAfter=6
+        )
+        
+        normal_style = styles['Normal']
+        
+        # Start building the document content
+        content = []
+        
+        # Header information
+        content.append(Paragraph(f"{assessment_data['assignment_name']}", title_style))
+        content.append(Spacer(1, 0.1 * inch))
+        content.append(Paragraph(f"Student: {assessment_data['student_name']}", heading_style))
+        content.append(Spacer(1, 0.2 * inch))
+        
+        # Summary table at the top (similar to the example)
+        percentage = assessment_data['percentage']
+        letter_grade = get_letter_grade(percentage)
+        
+        summary_data = [
+            ["Score", f"{assessment_data['total_awarded']} / {assessment_data['total_possible']}"],
+            ["Percentage", f"{percentage:.1f}%"],
+            ["Grade", letter_grade]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('BACKGROUND', (1, 0), (1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 12),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('PADDING', (0, 0), (-1, -1), 6),
+        ]))
+        
+        content.append(summary_table)
+        content.append(Spacer(1, 0.3 * inch))
+        
+        # Grading configuration summary
+        config = assessment_data['grading_config']
+        
+        if config['grading_mode'] == 'best_scores':
+            config_text = f"Grading Method: Best {config['questions_to_count']} of {len(assessment_data['question_summary'])} questions"
+        else:
+            config_text = f"Grading Method: {config['questions_to_count']} selected questions"
+            
+        content.append(Paragraph(config_text, normal_style))
+        content.append(Spacer(1, 0.2 * inch))
+        
+        # Question summary table
+        content.append(Paragraph("Question Summary", heading_style))
+        
+        # Create question summary table
+        question_data = [["Question", "Score", "Percentage", "Status"]]
+        
+        # Sort questions by whether they're counted, then by question number
+        sorted_summary = sorted(
+            assessment_data['question_summary'],
+            key=lambda x: (not x['counted'], x['question'])
+        )
+        
+        for q_summary in sorted_summary:
+            q_num = q_summary['question']
+            score = f"{q_summary['awarded']} / {q_summary['possible']}"
+            percentage = f"{q_summary['percentage']:.1f}%"
+            
+            if q_summary['counted']:
+                status = "Counted in final score"
+            elif q_summary['selected']:
+                status = "Selected but not counted"
+            else:
+                status = "Not selected"
+                
+            question_data.append([f"Question {q_num}", score, percentage, status])
+        
+        # Create and style the table
+        q_table = Table(question_data, colWidths=[1.5*inch, 1*inch, 1*inch, 2.5*inch])
+        q_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('ALIGN', (1, 1), (2, -1), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        
+        content.append(q_table)
+        content.append(Spacer(1, 0.2 * inch))
+        
+        # Detailed criteria
+        content.append(Paragraph("Detailed Assessment", heading_style))
+        
+        # Group criteria by question
+        question_criteria = {}
+        for criterion in assessment_data['criteria']:
+            q_num = extract_question_number(criterion['title'])
+            if q_num:
+                if q_num not in question_criteria:
+                    question_criteria[q_num] = []
+                question_criteria[q_num].append(criterion)
+        
+        # Add each question's criteria
+        for q_num in sorted(question_criteria.keys()):
+            # Check if this question was selected
+            if q_num in assessment_data['selected_questions']:
+                # Determine status for this question
+                if q_num in assessment_data['counted_questions']:
+                    status = " (Counted in final score)"
+                    q_style = subheading_style
+                else:
+                    status = " (Not counted in final score)"
+                    
+                    # Create a muted style for non-counted questions
+                    q_style = ParagraphStyle(
+                        'MutedHeading',
+                        parent=subheading_style,
+                        textColor=colors.gray
+                    )
+                
+                content.append(Paragraph(f"Question {q_num}{status}", q_style))
+                
+                # Create criteria table for this question
+                criteria_data = [["Criterion", "Score", "Comments"]]
+                
+                for criterion in question_criteria[q_num]:
+                    title = criterion['title'].replace(f"Question {q_num}", "").strip()
+                    if title.startswith(":"):
+                        title = title[1:].strip()
+                    
+                    score = f"{criterion['points_awarded']} / {criterion['points_possible']}"
+                    comments = criterion.get('comments', "")
+                    
+                    criteria_data.append([title, score, comments])
+                
+                # Create and style the table
+                c_table = Table(criteria_data, colWidths=[3*inch, 1*inch, 2*inch])
+                c_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                
+                content.append(c_table)
+                content.append(Spacer(1, 0.2 * inch))
+        
+        # Build and save the PDF
+        doc.build(content)
+        return True
+        
+    except ImportError:
+        # If reportlab is not installed, use a simpler approach
+        with open(file_path, 'w') as file:
+            file.write(f"{assessment_data['assignment_name']}\n")
+            file.write(f"Student: {assessment_data['student_name']}\n\n")
+            
+            # Simple summary
+            file.write("SUMMARY\n-------\n")
+            file.write(f"Score: {assessment_data['total_awarded']} / {assessment_data['total_possible']}\n")
+            file.write(f"Percentage: {assessment_data['percentage']:.1f}%\n")
+            file.write(f"Grade: {get_letter_grade(assessment_data['percentage'])}\n\n")
+            
+            file.write("Question Summary:\n")
+            for q_summary in assessment_data['question_summary']:
+                status = "Counted" if q_summary['counted'] else "Not counted"
+                file.write(f"Question {q_summary['question']}: {q_summary['awarded']} / {q_summary['possible']} ")
+                file.write(f"({q_summary['percentage']:.1f}%) - {status}\n")
+                
+            file.write("\nDetailed Assessment:\n")
+            for criterion in assessment_data['criteria']:
+                file.write(f"{criterion['title']}: {criterion['points_awarded']} / {criterion['points_possible']}\n")
+                if 'comments' in criterion and criterion['comments']:
+                    file.write(f"Comments: {criterion['comments']}\n")
+                file.write("\n")
+                
+        return True

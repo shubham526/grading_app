@@ -3,8 +3,9 @@ import json
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QFileDialog, QScrollArea,
                              QLineEdit, QMessageBox, QGroupBox, QCheckBox,
-                             QSpinBox, QDialog, QFormLayout)
+                             QSpinBox, QDialog, QFormLayout, QComboBox)
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 
 from widgets.criterion_widget import CriterionWidget
 from utils.rubric_parser import parse_rubric_file
@@ -25,12 +26,18 @@ class GradingConfigDialog(QDialog):
         self.setWindowTitle("Grading Configuration")
         layout = QFormLayout()
 
-        # Questions to grade
-        self.questions_to_grade = QSpinBox()
-        self.questions_to_grade.setMinimum(1)
-        self.questions_to_grade.setMaximum(self.total_questions)
-        self.questions_to_grade.setValue(self.total_questions)  # Default to all questions
-        layout.addRow("Number of questions to grade:", self.questions_to_grade)
+        # Grading mode selection
+        self.grading_mode = QComboBox()
+        self.grading_mode.addItem("Grade selected questions only", "selected")
+        self.grading_mode.addItem("Grade all questions, use best scores", "best_scores")
+        layout.addRow("Grading mode:", self.grading_mode)
+
+        # Questions to count in final score
+        self.questions_to_count = QSpinBox()
+        self.questions_to_count.setMinimum(1)
+        self.questions_to_count.setMaximum(self.total_questions)
+        self.questions_to_count.setValue(min(5, self.total_questions))  # Default to 5 or max
+        layout.addRow("Questions to count in final score:", self.questions_to_count)
 
         # Points per question
         self.points_per_question = QSpinBox()
@@ -48,12 +55,20 @@ class GradingConfigDialog(QDialog):
         self.fixed_total = QSpinBox()
         self.fixed_total.setMinimum(1)
         self.fixed_total.setMaximum(1000)
-        self.fixed_total.setValue(self.questions_to_grade.value() * self.points_per_question.value())
+        self.fixed_total.setValue(self.questions_to_count.value() * self.points_per_question.value())
         layout.addRow("Fixed total points:", self.fixed_total)
 
         # Update fixed total when other values change
-        self.questions_to_grade.valueChanged.connect(self.update_fixed_total)
+        self.questions_to_count.valueChanged.connect(self.update_fixed_total)
         self.points_per_question.valueChanged.connect(self.update_fixed_total)
+
+        # Information label
+        info_text = ("When using 'best scores' mode, you can grade all questions\n"
+                     "the student attempted, and the system will automatically\n"
+                     "use the highest-scoring questions for the final total.")
+        info_label = QLabel(info_text)
+        info_label.setStyleSheet("color: #0066CC; font-style: italic;")
+        layout.addRow(info_label)
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -69,12 +84,13 @@ class GradingConfigDialog(QDialog):
 
     def update_fixed_total(self):
         """Update the fixed total based on questions and points per question."""
-        self.fixed_total.setValue(self.questions_to_grade.value() * self.points_per_question.value())
+        self.fixed_total.setValue(self.questions_to_count.value() * self.points_per_question.value())
 
     def get_config(self):
         """Return the configuration as a dictionary."""
         return {
-            "questions_to_grade": self.questions_to_grade.value(),
+            "grading_mode": self.grading_mode.currentData(),
+            "questions_to_count": self.questions_to_count.value(),
             "points_per_question": self.points_per_question.value(),
             "use_fixed_total": self.use_fixed_total.isChecked(),
             "fixed_total": self.fixed_total.value()
@@ -95,18 +111,19 @@ class RubricGrader(QMainWindow):
 
         # Default grading configuration
         self.grading_config = {
-            "questions_to_grade": 5,  # Default to 5 questions
+            "grading_mode": "best_scores",  # "selected" or "best_scores"
+            "questions_to_count": 5,  # Number of questions to count in final score
             "points_per_question": 10,  # Default to 10 points per question
-            "use_fixed_total": True,   # Use fixed total by default
-            "fixed_total": 50          # Default to 50 points total
+            "use_fixed_total": True,  # Use fixed total by default
+            "fixed_total": 50  # Default to 50 points total
         }
 
         self.init_ui()
 
     def init_ui(self):
         """Set up the user interface."""
-        self.setWindowTitle("Flexible Rubric Grading Tool")
-        self.setMinimumSize(900, 700)
+        self.setWindowTitle("Advanced Rubric Grading Tool")
+        self.setMinimumSize(1000, 700)
 
         # Central widget and main layout
         central_widget = QWidget()
@@ -151,11 +168,12 @@ class RubricGrader(QMainWindow):
 
         # Grading configuration info
         self.config_info = QLabel()
+        self.config_info.setFont(QFont("Arial", 10, QFont.Bold))
         self.update_config_info()
         main_layout.addWidget(self.config_info)
 
         # Questions selection group
-        self.question_selection_group = QGroupBox("Questions to Grade")
+        self.question_selection_group = QGroupBox("Questions Attempted by Student")
         self.question_selection_layout = QHBoxLayout()
         self.question_selection_group.setLayout(self.question_selection_layout)
         self.question_selection_group.setVisible(False)
@@ -168,6 +186,13 @@ class RubricGrader(QMainWindow):
         self.criteria_layout = QVBoxLayout(self.scroll_content)
         self.scroll_area.setWidget(self.scroll_content)
         main_layout.addWidget(self.scroll_area)
+
+        # Question summary group
+        self.question_summary_group = QGroupBox("Question Scores Summary")
+        self.question_summary_layout = QVBoxLayout()
+        self.question_summary_group.setLayout(self.question_summary_layout)
+        self.question_summary_group.setVisible(False)
+        main_layout.addWidget(self.question_summary_group)
 
         # Bottom controls
         bottom_layout = QHBoxLayout()
@@ -197,17 +222,30 @@ class RubricGrader(QMainWindow):
 
     def update_config_info(self):
         """Update the displayed grading configuration info."""
+        if not self.grading_config:
+            self.config_info.setText("")
+            return
+
         config = self.grading_config
-        if config["use_fixed_total"]:
-            info = (f"Grading {config['questions_to_grade']} of {len(self.question_groups) if self.question_groups else '?'} "
-                   f"questions for a total of {config['fixed_total']} points")
+        total_questions = len(self.question_groups) if self.question_groups else "?"
+
+        # Build info text based on grading mode
+        if config["grading_mode"] == "best_scores":
+            info = (f"Grading Mode: Using best {config['questions_to_count']} of {total_questions} "
+                    f"questions for final score")
         else:
-            total = config['questions_to_grade'] * config['points_per_question']
-            info = (f"Grading {config['questions_to_grade']} of {len(self.question_groups) if self.question_groups else '?'} "
-                   f"questions at {config['points_per_question']} points each (Total: {total} points)")
+            info = (f"Grading Mode: Counting only {config['questions_to_count']} selected questions")
+
+        # Add points information
+        if config["use_fixed_total"]:
+            info += f" | Total possible: {config['fixed_total']} points"
+        else:
+            total = config['questions_to_count'] * config['points_per_question']
+            info += f" | {config['points_per_question']} points per question (Total: {total} points)"
 
         self.config_info.setText(info)
-        self.config_info.setStyleSheet("font-weight: bold; color: #0066CC;")
+        self.config_info.setStyleSheet(
+            "font-weight: bold; color: #0066CC; padding: 5px; background-color: #F0F8FF; border: 1px solid #AACCEE;")
 
     def show_grading_config(self):
         """Show dialog to configure grading options."""
@@ -218,7 +256,11 @@ class RubricGrader(QMainWindow):
         dialog = GradingConfigDialog(len(self.question_groups), self)
 
         # Set current values
-        dialog.questions_to_grade.setValue(self.grading_config["questions_to_grade"])
+        index = dialog.grading_mode.findData(self.grading_config["grading_mode"])
+        if index >= 0:
+            dialog.grading_mode.setCurrentIndex(index)
+
+        dialog.questions_to_count.setValue(self.grading_config["questions_to_count"])
         dialog.points_per_question.setValue(self.grading_config["points_per_question"])
         dialog.use_fixed_total.setChecked(self.grading_config["use_fixed_total"])
         dialog.fixed_total.setValue(self.grading_config["fixed_total"])
@@ -227,9 +269,8 @@ class RubricGrader(QMainWindow):
             self.grading_config = dialog.get_config()
             self.update_config_info()
 
-            # Update max selectable questions
-            max_select = self.grading_config["questions_to_grade"]
-            self.update_question_selection(max_select)
+            # Update question selection UI
+            self.setup_question_selection()
 
             # Update total points display
             self.update_total_points()
@@ -343,49 +384,62 @@ class RubricGrader(QMainWindow):
         return question_id
 
     def setup_question_selection(self):
-        """Set up checkboxes for selecting which questions to grade."""
+        """Set up checkboxes for selecting which questions the student attempted."""
         # Clear existing checkboxes
         self.clear_layout(self.question_selection_layout)
+
+        grading_mode = self.grading_config["grading_mode"]
+        questions_to_count = self.grading_config["questions_to_count"]
 
         # If we found multiple main questions, create checkboxes for selection
         if len(self.question_groups) > 1:
             self.question_selection_group.setVisible(True)
             self.question_checkboxes = {}
 
-            # Helper text based on grading config
-            helper_text = f"Select {self.grading_config['questions_to_grade']} questions the student attempted:"
+            # Helper text based on grading mode
+            if grading_mode == "best_scores":
+                helper_text = "Select ALL questions the student attempted:"
+            else:
+                helper_text = f"Select the {questions_to_count} questions to grade:"
+
             helper_label = QLabel(helper_text)
             helper_label.setStyleSheet("font-weight: bold;")
             self.question_selection_layout.addWidget(helper_label)
 
             for q in sorted(self.question_groups.keys()):
-                checkbox = QCheckBox(f"Q{q}")
+                checkbox = QCheckBox(f"Question {q}")
                 checkbox.setChecked(True)  # Default to checked
                 checkbox.stateChanged.connect(self.update_total_points)
                 self.question_selection_layout.addWidget(checkbox)
                 self.question_checkboxes[q] = checkbox
 
-            self.update_question_selection(self.grading_config["questions_to_grade"])
+            # Add select all/none buttons
+            self.question_selection_layout.addStretch()
+            select_all_btn = QPushButton("Select All")
+            select_all_btn.clicked.connect(self.select_all_questions)
+            self.question_selection_layout.addWidget(select_all_btn)
+
+            select_none_btn = QPushButton("Select None")
+            select_none_btn.clicked.connect(self.select_no_questions)
+            self.question_selection_layout.addWidget(select_none_btn)
+
         else:
             self.question_selection_group.setVisible(False)
 
-    def update_question_selection(self, max_selectable):
-        """Update question selection based on maximum selectable questions."""
-        if not hasattr(self, 'question_checkboxes') or not self.question_checkboxes:
-            return
+        # Update the question summary display
+        self.update_question_summary()
 
-        # Count checked boxes
-        checked = sum(1 for cb in self.question_checkboxes.values() if cb.isChecked())
+    def select_all_questions(self):
+        """Select all question checkboxes."""
+        if hasattr(self, 'question_checkboxes'):
+            for checkbox in self.question_checkboxes.values():
+                checkbox.setChecked(True)
 
-        # If more checked than allowed, uncheck some
-        if checked > max_selectable:
-            for i, (q, cb) in enumerate(sorted(self.question_checkboxes.items())):
-                if cb.isChecked() and i >= max_selectable:
-                    cb.setChecked(False)
-
-        # Update selection text
-        helper_text = f"Select {max_selectable} questions the student attempted:"
-        self.question_selection_layout.itemAt(0).widget().setText(helper_text)
+    def select_no_questions(self):
+        """Deselect all question checkboxes."""
+        if hasattr(self, 'question_checkboxes'):
+            for checkbox in self.question_checkboxes.values():
+                checkbox.setChecked(False)
 
     def clear_layout(self, layout):
         """Clear all widgets from a layout."""
@@ -407,8 +461,105 @@ class RubricGrader(QMainWindow):
         # Return the list of checked question numbers
         return [q for q, cb in self.question_checkboxes.items() if cb.isChecked()]
 
+    def update_question_summary(self):
+        """Update the question summary display showing scores per question."""
+        # Clear existing summary
+        self.clear_layout(self.question_summary_layout)
+
+        if not self.question_groups:
+            self.question_summary_group.setVisible(False)
+            return
+
+        self.question_summary_group.setVisible(True)
+
+        # Calculate scores for each question
+        question_scores = {}
+        for q, widgets in self.question_groups.items():
+            awarded = sum(widget.get_awarded_points() for widget in widgets)
+            possible = sum(widget.get_possible_points() for widget in widgets)
+            percentage = (awarded / possible * 100) if possible > 0 else 0
+            question_scores[q] = (awarded, possible, percentage)
+
+        # Create summary labels
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("Question"))
+        header_layout.addWidget(QLabel("Score"))
+        header_layout.addWidget(QLabel("Percentage"))
+        header_layout.addWidget(QLabel("Status"))
+        header_layout.addStretch()
+        self.question_summary_layout.addLayout(header_layout)
+
+        # Add a line under the header
+        line = QLabel()
+        line.setFrameShape(QLabel.HLine)
+        line.setFrameShadow(QLabel.Sunken)
+        self.question_summary_layout.addWidget(line)
+
+        # Create sorted list of questions by percentage (highest first)
+        sorted_questions = sorted(
+            question_scores.items(),
+            key=lambda x: x[1][2],
+            reverse=True
+        )
+
+        # Determine which questions are counted in the final score
+        questions_to_count = self.grading_config["questions_to_count"]
+        selected_questions = self.get_selected_questions()
+
+        if self.grading_config["grading_mode"] == "best_scores":
+            # Use the best N questions from the selected ones
+            best_questions = [q for q, _ in sorted_questions[:questions_to_count]
+                              if q in selected_questions]
+        else:
+            # Use exactly the selected questions
+            best_questions = selected_questions
+
+        # Add summary for each question
+        for q, (awarded, possible, percentage) in sorted_questions:
+            row_layout = QHBoxLayout()
+
+            # Question number
+            q_label = QLabel(f"Question {q}")
+            row_layout.addWidget(q_label)
+
+            # Score
+            score_label = QLabel(f"{awarded} / {possible}")
+            row_layout.addWidget(score_label)
+
+            # Percentage
+            pct_label = QLabel(f"{percentage:.1f}%")
+            row_layout.addWidget(pct_label)
+
+            # Status (counted in final score or not)
+            status = ""
+            if q in selected_questions:
+                if q in best_questions:
+                    status = "Counted in final score"
+                    status_label = QLabel(status)
+                    status_label.setStyleSheet("color: green; font-weight: bold;")
+                else:
+                    status = "Selected but not counted (better scores exist)"
+                    status_label = QLabel(status)
+                    status_label.setStyleSheet("color: #CC7700;")
+            else:
+                status = "Not selected for grading"
+                status_label = QLabel(status)
+                status_label.setStyleSheet("color: #999999;")
+
+            row_layout.addWidget(status_label)
+            row_layout.addStretch()
+
+            # Add the row to the summary
+            self.question_summary_layout.addLayout(row_layout)
+
+        # Add note about best scores if applicable
+        if self.grading_config["grading_mode"] == "best_scores":
+            note = QLabel(f"Note: Final score uses the {questions_to_count} highest-scoring questions.")
+            note.setStyleSheet("font-style: italic; color: #0066CC; margin-top: 10px;")
+            self.question_summary_layout.addWidget(note)
+
     def update_total_points(self):
-        """Update the total points display based on selected questions."""
+        """Update the total points display based on selected questions and mode."""
         if not self.criterion_widgets:
             self.total_label.setText("Total: 0 / 0 points")
             return
@@ -417,18 +568,19 @@ class RubricGrader(QMainWindow):
 
         # Count how many selected questions we have
         num_selected = len(selected_questions)
-        questions_to_grade = self.grading_config["questions_to_grade"]
+        questions_to_count = self.grading_config["questions_to_count"]
+        grading_mode = self.grading_config["grading_mode"]
 
-        if num_selected < questions_to_grade:
-            # If fewer than required questions selected, show warning
-            self.total_label.setText(f"Please select {questions_to_grade} questions " +
-                                   f"(currently {num_selected} selected)")
+        # Handle based on grading mode
+        if grading_mode == "selected" and num_selected != questions_to_count:
+            # In "selected" mode, we need exactly the right number
+            self.total_label.setText(f"Please select exactly {questions_to_count} questions " +
+                                     f"(currently {num_selected} selected)")
             self.total_label.setStyleSheet("color: red; font-weight: bold; font-size: 14pt;")
             return
-        elif num_selected > questions_to_grade:
-            # If more than required questions selected, show warning
-            self.total_label.setText(f"Please select only {questions_to_grade} questions " +
-                                   f"(currently {num_selected} selected)")
+        elif grading_mode == "best_scores" and num_selected < 1:
+            # In "best_scores" mode, we need at least one selection
+            self.total_label.setText("Please select at least one question to grade")
             self.total_label.setStyleSheet("color: red; font-weight: bold; font-size: 14pt;")
             return
 
@@ -440,30 +592,51 @@ class RubricGrader(QMainWindow):
                 q_widgets = self.question_groups[q]
                 question_awarded = sum(widget.get_awarded_points() for widget in q_widgets)
                 question_possible = sum(widget.get_possible_points() for widget in q_widgets)
-                question_points[q] = (question_awarded, question_possible)
+                percentage = (question_awarded / question_possible * 100) if question_possible > 0 else 0
+                question_points[q] = (question_awarded, question_possible, percentage)
 
-        # Calculate total points from the selected questions
-        earned_total = sum(points[0] for points in question_points.values())
+        # Sort questions by score percentage (descending)
+        sorted_questions = sorted(
+            question_points.items(),
+            key=lambda x: x[1][2],
+            reverse=True
+        )
 
-        # Determine max possible points based on configuration
-        if self.grading_config["use_fixed_total"]:
-            # Use the fixed total
-            possible_total = self.grading_config["fixed_total"]
+        # Calculate total points based on grading mode
+        if grading_mode == "best_scores":
+            # Take the best N questions (limited by how many were selected)
+            count_to_use = min(questions_to_count, len(sorted_questions))
+            best_questions = sorted_questions[:count_to_use]
+            earned_points = sum(points[0] for _, points in best_questions)
+
+            if self.grading_config["use_fixed_total"]:
+                possible_points = self.grading_config["fixed_total"]
+            else:
+                possible_points = sum(points[1] for _, points in best_questions)
         else:
-            # Calculate from selected questions
-            possible_total = sum(points[1] for points in question_points.values())
+            # Use exactly the selected questions
+            earned_points = sum(points[0] for _, points in sorted_questions)
 
-        self.total_label.setText(f"Total: {earned_total} / {possible_total} points")
+            if self.grading_config["use_fixed_total"]:
+                possible_points = self.grading_config["fixed_total"]
+            else:
+                possible_points = sum(points[1] for _, points in sorted_questions)
+
+        # Update the total display
+        self.total_label.setText(f"Total: {earned_points} / {possible_points} points")
 
         # Update color based on score
-        if possible_total > 0:
-            percentage = (earned_total / possible_total) * 100
+        if possible_points > 0:
+            percentage = (earned_points / possible_points) * 100
             if percentage >= 90:
                 self.total_label.setStyleSheet("color: green; font-weight: bold; font-size: 14pt;")
             elif percentage >= 70:
                 self.total_label.setStyleSheet("color: #CC7700; font-weight: bold; font-size: 14pt;")
             else:
                 self.total_label.setStyleSheet("color: red; font-weight: bold; font-size: 14pt;")
+
+        # Update the question summary
+        self.update_question_summary()
 
     def clear_form(self):
         """Clear all entered data."""
@@ -474,10 +647,8 @@ class RubricGrader(QMainWindow):
 
         # Reset checkboxes if they exist
         if hasattr(self, 'question_checkboxes'):
-            # Check first N checkboxes where N is questions_to_grade
-            questions_to_grade = self.grading_config["questions_to_grade"]
-            for i, (q, cb) in enumerate(sorted(self.question_checkboxes.items())):
-                cb.setChecked(i < questions_to_grade)
+            for checkbox in self.question_checkboxes.values():
+                checkbox.setChecked(True)
 
         self.update_total_points()
 
@@ -487,47 +658,107 @@ class RubricGrader(QMainWindow):
             return None
 
         selected_questions = self.get_selected_questions()
-        questions_to_grade = self.grading_config["questions_to_grade"]
+        questions_to_count = self.grading_config["questions_to_count"]
+        grading_mode = self.grading_config["grading_mode"]
 
-        # Verify we have exactly the required number of selected questions
-        if len(selected_questions) != questions_to_grade:
+        # Validate selections based on grading mode
+        if grading_mode == "selected" and len(selected_questions) != questions_to_count:
             QMessageBox.warning(
                 self,
                 "Warning",
-                f"Please select exactly {questions_to_grade} questions to grade."
+                f"Please select exactly {questions_to_count} questions to grade."
+            )
+            return None
+        elif grading_mode == "best_scores" and len(selected_questions) < 1:
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "Please select at least one question to grade."
             )
             return None
 
-        # Get data for all criteria, but mark which ones are in selected questions
+        # Calculate points for each selected question
+        question_points = {}
+        for q in selected_questions:
+            if q in self.question_groups:
+                q_widgets = self.question_groups[q]
+                question_awarded = sum(widget.get_awarded_points() for widget in q_widgets)
+                question_possible = sum(widget.get_possible_points() for widget in q_widgets)
+                percentage = (question_awarded / question_possible * 100) if question_possible > 0 else 0
+                question_points[q] = (question_awarded, question_possible, percentage)
+
+        # Determine which questions count toward the final score
+        if grading_mode == "best_scores":
+            # Sort questions by percentage and take the best N
+            sorted_questions = sorted(
+                question_points.items(),
+                key=lambda x: x[1][2],
+                reverse=True
+            )
+            count_to_use = min(questions_to_count, len(sorted_questions))
+            best_questions = [q for q, _ in sorted_questions[:count_to_use]]
+        else:
+            # Use all selected questions
+            best_questions = selected_questions
+
+        # Get data for all criteria, marking which ones are selected and counted
         criteria_data = []
         for widget in self.criterion_widgets:
             data = widget.get_data()
 
             # Determine if this criterion is part of a selected question
             title = data["title"]
-            is_selected = False
 
             main_question = self.extract_question_number(title)
-            if main_question:
-                is_selected = main_question in selected_questions
+            is_selected = main_question in selected_questions
+            is_counted = main_question in best_questions
 
             data["selected"] = is_selected
+            data["counted"] = is_counted
             criteria_data.append(data)
 
-        # Calculate totals based on configuration
-        selected_criteria = [c for c in criteria_data if c["selected"]]
-        earned_total = sum(c["points_awarded"] for c in selected_criteria)
+        # Calculate final score
+        counted_question_points = [points for q, points in question_points.items() if q in best_questions]
+        earned_total = sum(points[0] for points in counted_question_points)
 
         if self.grading_config["use_fixed_total"]:
             possible_total = self.grading_config["fixed_total"]
         else:
-            possible_total = sum(c["points_possible"] for c in selected_criteria)
+            possible_total = sum(points[1] for points in counted_question_points)
+
+            # Create question summary data for the report
+        question_summary = []
+        for q in sorted(self.question_groups.keys()):
+            if q in question_points:
+                points = question_points[q]
+                question_summary.append({
+                    "question": q,
+                    "awarded": points[0],
+                    "possible": points[1],
+                    "percentage": points[2],
+                    "selected": True,
+                    "counted": q in best_questions
+                })
+            else:
+                # Question not attempted/selected
+                q_widgets = self.question_groups[q]
+                possible = sum(widget.get_possible_points() for widget in q_widgets)
+                question_summary.append({
+                    "question": q,
+                    "awarded": 0,
+                    "possible": possible,
+                    "percentage": 0,
+                    "selected": False,
+                    "counted": False
+                })
 
         return {
             "student_name": self.student_name_edit.text(),
             "assignment_name": self.assignment_name_edit.text(),
             "criteria": criteria_data,
             "selected_questions": selected_questions,
+            "counted_questions": best_questions,
+            "question_summary": question_summary,
             "grading_config": self.grading_config,
             "total_awarded": earned_total,
             "total_possible": possible_total,
@@ -650,3 +881,4 @@ class RubricGrader(QMainWindow):
             QMessageBox.information(self, "Success", "Assessment exported to PDF successfully.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export to PDF: {str(e)}")
+
