@@ -2,23 +2,288 @@ import os
 import json
 import tempfile
 import time
+import glob
+from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QFileDialog, QScrollArea,
                              QLineEdit, QMessageBox, QGroupBox, QCheckBox,
-                             QSpinBox, QDialog, QFormLayout, QComboBox, QFrame)
-from PyQt5.QtCore import Qt, QTimer, QPoint
+                             QSpinBox, QDialog, QFormLayout, QComboBox, QFrame, QDialogButtonBox, QSplitter)
+from PyQt5.QtWidgets import (QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QProgressDialog, QSlider)
+
+
+from PyQt5.QtCore import Qt, QTimer
 import qtawesome as qta
+from PyQt5.QtGui import QColor, QFont
+import matplotlib.pyplot as plt
+
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.figure import Figure
+import numpy as np
+import re
+import os
+import json
+import glob
 
 
 from widgets.criterion_widget import CriterionWidget
 from widgets.header_widget import HeaderWidget
 from widgets.status_bar_widget import StatusBarWidget
 from widgets.card_widget import CardWidget
-from widgets.action_button import FloatingActionButton
-from widgets.form_widgets import StyledFormLayout, FormField
 from utils.rubric_parser import parse_rubric_file
 from utils.pdf_generator import generate_assessment_pdf
 from utils.styles import COLORS
+
+
+# Create a canvas class for matplotlib
+class MatplotlibCanvas(FigureCanvasQTAgg):
+    def __init__(self, parent=None, dpi=100):
+        self.fig = Figure(figsize=(5, 4), dpi=dpi)
+        self.axes = self.fig.add_subplot(111)
+        super(MatplotlibCanvas, self).__init__(self.fig)
+        self.fig.tight_layout()
+
+
+class AnalyticsDialog(QDialog):
+    """Dialog for showing student performance analytics."""
+
+    def __init__(self, parent=None, student_data=None):
+        super().__init__(parent)
+        self.student_data = student_data
+        self.init_ui()
+
+    def init_ui(self):
+        """Set up the dialog UI."""
+        self.setWindowTitle("Student Performance Analytics")
+        self.setMinimumSize(800, 600)
+
+        # Create layout
+        layout = QVBoxLayout(self)
+
+        # Create tabs for different analytics views
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+
+        # Create question performance tab
+        question_tab = QWidget()
+        question_layout = QVBoxLayout(question_tab)
+
+        # Add chart selection controls
+        control_layout = QHBoxLayout()
+        control_layout.addWidget(QLabel("Select Question:"))
+
+        self.question_combo = QComboBox()
+        if self.student_data and "question_data" in self.student_data:
+            for q in sorted(self.student_data["question_data"].keys(), key=int):
+                q_data = self.student_data["question_data"][q]
+                title = q_data.get("title", f"Question {q}")
+                self.question_combo.addItem(title)
+        self.question_combo.currentIndexChanged.connect(self.update_chart)
+        control_layout.addWidget(self.question_combo)
+
+        # Add normalization option
+        self.normalize_cb = QCheckBox("Show as percentage")
+        self.normalize_cb.setChecked(False)  # Default to actual counts
+        self.normalize_cb.stateChanged.connect(self.update_chart)
+        control_layout.addWidget(self.normalize_cb)
+
+        # Add bin count slider
+        control_layout.addWidget(QLabel("Bins:"))
+        self.bin_slider = QSlider(Qt.Horizontal)
+        self.bin_slider.setRange(3, 20)
+        self.bin_slider.setValue(10)
+        self.bin_slider.setMaximumWidth(100)
+        self.bin_slider.valueChanged.connect(self.update_chart)
+        control_layout.addWidget(self.bin_slider)
+
+        control_layout.addStretch()
+        question_layout.addLayout(control_layout)
+
+        # Create matplotlib canvas for histogram
+        self.canvas = MatplotlibCanvas(self)
+        question_layout.addWidget(self.canvas)
+
+        # Add toolbar
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        question_layout.addWidget(self.toolbar)
+
+        # Add stats
+        self.stats_label = QLabel()
+        self.stats_label.setStyleSheet("font-size: 12px; padding: 5px; background-color: #f0f0f0; border-radius: 3px;")
+        question_layout.addWidget(self.stats_label)
+
+        self.tabs.addTab(question_tab, "Question Performance")
+
+        # Create overall performance tab
+        overall_tab = QWidget()
+        overall_layout = QVBoxLayout(overall_tab)
+
+        # Create canvas for overall performance
+        self.overall_canvas = MatplotlibCanvas(self)
+        overall_layout.addWidget(self.overall_canvas)
+
+        # Add toolbar
+        self.overall_toolbar = NavigationToolbar2QT(self.overall_canvas, self)
+        overall_layout.addWidget(self.overall_toolbar)
+
+        # Add overall stats
+        self.overall_stats_label = QLabel()
+        self.overall_stats_label.setStyleSheet(
+            "font-size: 12px; padding: 5px; background-color: #f0f0f0; border-radius: 3px;")
+        overall_layout.addWidget(self.overall_stats_label)
+
+        self.tabs.addTab(overall_tab, "Overall Performance")
+
+        # Add file info
+        file_info = QLabel()
+        if self.student_data and "file_count" in self.student_data:
+            file_info.setText(f"Analyzing {self.student_data['file_count']} assessment files")
+        else:
+            file_info.setText("No assessment files loaded")
+        file_info.setStyleSheet("color: #555; font-style: italic;")
+        layout.addWidget(file_info)
+
+        # Add button box
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        # Initialize charts
+        self.update_chart()
+        self.update_overall_chart()
+
+    def update_chart(self):
+        """Update the question performance chart."""
+        if not self.student_data or "question_data" not in self.student_data:
+            return
+
+        # Clear the canvas
+        self.canvas.axes.clear()
+
+        # Get selected question
+        q_idx = self.question_combo.currentIndex()
+        if q_idx < 0:
+            return
+
+        q_key = sorted(self.student_data["question_data"].keys(), key=int)[q_idx]
+        q_data = self.student_data["question_data"][q_key]
+
+        # Get scores
+        scores = q_data["scores"]
+        max_points = q_data["max_points"]
+
+        # Calculate percentages
+        percentages = []
+        for score in scores:
+            if max_points > 0:
+                percentages.append((score / max_points) * 100)
+            else:
+                percentages.append(0)
+
+        # Get bin count
+        bins = self.bin_slider.value()
+
+        # Plot histogram
+        if self.normalize_cb.isChecked():
+            # Plot normalized (percentage) histogram
+            n, bins, patches = self.canvas.axes.hist(percentages, bins=bins, alpha=0.7,
+                                                     range=(0, 100), density=True,
+                                                     color='#3F51B5', edgecolor='black')
+            self.canvas.axes.set_xlabel('Score (%)')
+            self.canvas.axes.set_ylabel('Frequency Density')
+        else:
+            # Plot count histogram
+            n, bins, patches = self.canvas.axes.hist(percentages, bins=bins, alpha=0.7,
+                                                     range=(0, 100), density=False,
+                                                     color='#3F51B5', edgecolor='black')
+            self.canvas.axes.set_xlabel('Score (%)')
+            self.canvas.axes.set_ylabel('Number of Students')
+
+        # Add grid
+        self.canvas.axes.grid(axis='y', alpha=0.75)
+
+        # Set title
+        question_title = q_data.get("title", f"Question {q_key}")
+        self.canvas.axes.set_title(question_title)
+
+        # Calculate statistics
+        mean = np.mean(percentages) if percentages else 0
+        median = np.median(percentages) if percentages else 0
+        std_dev = np.std(percentages) if percentages else 0
+
+        # Update stats label
+        stats_text = f"Statistics: Mean: {mean:.1f}% | Median: {median:.1f}% | Standard Deviation: {std_dev:.1f}% | Sample Size: {len(percentages)}"
+        self.stats_label.setText(stats_text)
+
+        # Refresh the canvas
+        self.canvas.draw()
+
+    def update_overall_chart(self):
+        """Update the overall performance chart."""
+        if not self.student_data or "question_data" not in self.student_data:
+            return
+
+        # Clear the canvas
+        self.overall_canvas.axes.clear()
+
+        # If we have direct overall scores, use them
+        if "overall_data" in self.student_data and "overall_scores" in self.student_data["overall_data"]:
+            overall_scores = self.student_data["overall_data"]["overall_scores"]
+        else:
+            # Otherwise calculate overall scores from individual questions
+            # Get all student scores by percentage
+            student_count = 0
+            for q, q_data in self.student_data["question_data"].items():
+                scores = q_data.get("scores", [])
+                student_count = max(student_count, len(scores))
+
+            # Create overall scores by averaging each student's question percentages
+            overall_scores = []
+            for i in range(student_count):
+                student_percentages = []
+                total_points = 0
+                earned_points = 0
+
+                for q, q_data in self.student_data["question_data"].items():
+                    if i < len(q_data.get("scores", [])):
+                        points = q_data.get("max_points", 0)
+                        if points > 0:
+                            total_points += points
+                            earned_points += q_data["scores"][i]
+
+                if total_points > 0:
+                    overall_percentage = (earned_points / total_points) * 100
+                    overall_scores.append(overall_percentage)
+
+        # Plot histogram
+        if overall_scores:
+            n, bins, patches = self.overall_canvas.axes.hist(overall_scores, bins=10, alpha=0.7,
+                                                             range=(0, 100), density=False,
+                                                             color='#4CAF50', edgecolor='black')
+            self.overall_canvas.axes.set_xlabel('Overall Score (%)')
+            self.overall_canvas.axes.set_ylabel('Number of Students')
+            self.overall_canvas.axes.set_title('Overall Score Distribution')
+
+            # Add grid
+            self.overall_canvas.axes.grid(axis='y', alpha=0.75)
+
+            # Calculate statistics
+            mean = np.mean(overall_scores) if overall_scores else 0
+            median = np.median(overall_scores) if overall_scores else 0
+            std_dev = np.std(overall_scores) if overall_scores else 0
+
+            # Update stats label
+            stats_text = f"Statistics: Mean: {mean:.1f}% | Median: {median:.1f}% | Standard Deviation: {std_dev:.1f}% | Sample Size: {len(overall_scores)}"
+            self.overall_stats_label.setText(stats_text)
+        else:
+            # No data message
+            self.overall_canvas.axes.text(0.5, 0.5, "No overall data available",
+                                          ha='center', va='center', fontsize=14,
+                                          transform=self.overall_canvas.axes.transAxes)
+
+        # Refresh the canvas
+        self.overall_canvas.draw()
 
 
 class GradingConfigDialog(QDialog):
@@ -32,283 +297,91 @@ class GradingConfigDialog(QDialog):
 
     def init_ui(self):
         """Set up the user interface."""
-        self.setWindowTitle("Rubric Grading Tool")
-        self.setMinimumSize(1000, 700)
+        self.setWindowTitle("Grading Configuration")
+        self.setMinimumWidth(400)
 
-
-        # Central widget and main layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(16, 16, 16, 16)  # Add some padding
-
-        # Add header
-        self.header = HeaderWidget()
-        main_layout.addWidget(self.header)
-
-        # Add a divider
-        divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setFrameShadow(QFrame.Sunken)
-        divider.setStyleSheet(f"background-color: {COLORS['divider'].name()};")
-        main_layout.addWidget(divider)
-
-        # Create a toolbar container
-        toolbar_container = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar_container)
-        toolbar_layout.setContentsMargins(0, 8, 0, 8)
-
-        # Rubric controls group
-        rubric_group = QWidget()
-        rubric_layout = QHBoxLayout(rubric_group)
-        rubric_layout.setContentsMargins(0, 0, 0, 0)
-        rubric_layout.setSpacing(8)
-
-        # Load rubric button
-        self.load_btn = QPushButton("Load Rubric")
-        self.load_btn.setIcon(qta.icon('fa5s.folder-open'))
-        self.load_btn.clicked.connect(self.load_rubric)
-        rubric_layout.addWidget(self.load_btn)
-
-        # Save rubric as button (new)
-        self.save_rubric_btn = QPushButton("Save Rubric As...")
-        self.save_rubric_btn.setIcon(qta.icon('fa5s.save'))
-        self.save_rubric_btn.clicked.connect(self.save_rubric_as)
-        self.save_rubric_btn.setEnabled(False)
-        rubric_layout.addWidget(self.save_rubric_btn)
-
-        toolbar_layout.addWidget(rubric_group)
-
-        # Add spacer
-        toolbar_layout.addStretch()
-
-        # Student and assignment info
-        info_widget = QWidget()
-        info_layout = QHBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(16)
-
-        # Student name field with floating label
-        student_container = QWidget()
-        student_layout = QVBoxLayout(student_container)
-        student_layout.setContentsMargins(0, 0, 0, 0)
-        student_layout.setSpacing(4)
-
-        student_label = QLabel("Student")
-        student_label.setStyleSheet("color: #757575; font-size: 12px;")
-        student_layout.addWidget(student_label)
-
-        self.student_name_edit = QLineEdit()
-        self.student_name_edit.setPlaceholderText("Enter student name")
-        student_layout.addWidget(self.student_name_edit)
-
-        info_layout.addWidget(student_container)
-
-        # Assignment name field with floating label
-        assignment_container = QWidget()
-        assignment_layout = QVBoxLayout(assignment_container)
-        assignment_layout.setContentsMargins(0, 0, 0, 0)
-        assignment_layout.setSpacing(4)
-
-        assignment_label = QLabel("Assignment")
-        assignment_label.setStyleSheet("color: #757575; font-size: 12px;")
-        assignment_layout.addWidget(assignment_label)
-
-        self.assignment_name_edit = QLineEdit()
-        self.assignment_name_edit.setPlaceholderText("Enter assignment name")
-        assignment_layout.addWidget(self.assignment_name_edit)
-
-        info_layout.addWidget(assignment_container)
-
-        toolbar_layout.addWidget(info_widget)
-
-        # Add spacer
-        toolbar_layout.addStretch()
-
-        # Action buttons
-        actions_widget = QWidget()
-        actions_layout = QHBoxLayout(actions_widget)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(8)
-
-        # Grading configuration button
-        self.config_btn = QPushButton("Grading Config")
-        self.config_btn.setIcon(qta.icon('fa5s.cog'))
-        self.config_btn.clicked.connect(self.show_grading_config)
-        self.config_btn.setEnabled(False)
-        actions_layout.addWidget(self.config_btn)
-
-        # Export button
-        self.export_btn = QPushButton("Export to PDF")
-        self.export_btn.setIcon(qta.icon('fa5s.file-export'))
-        self.export_btn.clicked.connect(self.export_to_pdf)
-        self.export_btn.setEnabled(False)
-        actions_layout.addWidget(self.export_btn)
-
-        toolbar_layout.addWidget(actions_widget)
-
-        main_layout.addWidget(toolbar_container)
-
-        # Status label with heading style
-        self.status_label = QLabel("Please load a rubric to begin")
-        self.status_label.setProperty("labelType", "heading")
-        main_layout.addWidget(self.status_label)
-
-        # Grading configuration card
-        self.config_card = CardWidget("Grading Configuration")
-        config_layout = self.config_card.get_content_layout()
-        self.config_info = QLabel()
-        config_layout.addWidget(self.config_info)
-        main_layout.addWidget(self.config_card)
-        self.update_config_info()
-
-        # Questions selection group
-        self.question_selection_group = QGroupBox("Questions Attempted by Student")
-        self.question_selection_group.setStyleSheet("""
-            QGroupBox {
-                background-color: white;
-                border-radius: 4px;
-                margin-top: 16px;
-            }
-        """)
-        self.question_selection_layout = QHBoxLayout()
-        self.question_selection_group.setLayout(self.question_selection_layout)
-        self.question_selection_group.setVisible(False)
-        main_layout.addWidget(self.question_selection_group)
-
-        # Scroll area for criteria with card-like appearance
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setMinimumHeight(300)  # Set a minimum height
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QWidget#scrollContent {
-                background-color: white;
-                border-radius: 8px;
-                border: 1px solid #BDBDBD;
-            }
-        """)
-        self.scroll_content = QWidget()
-        self.scroll_content.setObjectName("scrollContent")  # For styling
-        self.criteria_layout = QVBoxLayout(self.scroll_content)
-        self.criteria_layout.setContentsMargins(16, 16, 16, 16)  # Add padding
-        self.scroll_area.setWidget(self.scroll_content)
-        main_layout.addWidget(self.scroll_area)
-
-        # Question summary widget with collapsible header
-        self.question_summary_card = QWidget()
-        self.question_summary_card.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border-radius: 4px;
-                border: 1px solid #EEEEEE;
-                margin: 8px 0px;
-            }
-        """)
-        question_summary_layout = QVBoxLayout(self.question_summary_card)
-        question_summary_layout.setContentsMargins(0, 0, 0, 0)
-        question_summary_layout.setSpacing(0)
-
-        # Create collapsible header
-        header_widget = QWidget()
-        header_widget.setStyleSheet("""
-            QWidget {
-                background-color: #3F51B5;
-                border-radius: 4px 4px 0 0;
-            }
-            QWidget:hover {
-                background-color: #303F9F;
-            }
-        """)
-        header_widget.setCursor(Qt.PointingHandCursor)
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(16, 8, 16, 8)
+        # Create layout for the dialog
+        layout = QVBoxLayout(self)
 
         # Add title
-        title_label = QLabel("Question Scores Summary")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
-        header_layout.addWidget(title_label)
+        title_label = QLabel("Configure Grading Options")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #3F51B5;")
+        layout.addWidget(title_label)
 
-        # Add toggle indicator
-        self.toggle_indicator = QLabel("▼")  # Down arrow for collapse
-        self.toggle_indicator.setStyleSheet("color: white; font-weight: bold;")
-        header_layout.addWidget(self.toggle_indicator, 0, Qt.AlignRight)
+        # Create form for configuration options
+        form = QFormLayout()
+        form.setSpacing(10)
 
-        # Add header to layout
-        question_summary_layout.addWidget(header_widget)
+        # Grading mode selection
+        self.grading_mode = QComboBox()
+        self.grading_mode.addItem("Use best scores", "best_scores")
+        self.grading_mode.addItem("Use selected questions", "selected")
+        self.grading_mode.currentIndexChanged.connect(self.update_mode_description)
+        form.addRow("Grading Mode:", self.grading_mode)
 
-        # Create content container
-        self.summary_content = QWidget()
-        self.question_summary_layout = QVBoxLayout(self.summary_content)
-        self.question_summary_layout.setContentsMargins(12, 12, 12, 12)
-        question_summary_layout.addWidget(self.summary_content)
+        # Mode description
+        self.mode_description = QLabel()
+        self.mode_description.setWordWrap(True)
+        self.mode_description.setStyleSheet("color: #757575; font-style: italic;")
+        form.addRow("", self.mode_description)
 
-        # Add the card to main layout
-        main_layout.addWidget(self.question_summary_card)
-        self.question_summary_card.setVisible(False)
+        # Questions to count
+        self.questions_to_count = QSpinBox()
+        self.questions_to_count.setRange(1, self.total_questions)
+        self.questions_to_count.setValue(min(5, self.total_questions))
+        form.addRow("Questions to Count:", self.questions_to_count)
 
-        # Connect header click for toggling
-        self.summary_content_visible = True
-        header_widget.mousePressEvent = self.toggle_summary_content
+        # Points per question
+        self.points_per_question = QSpinBox()
+        self.points_per_question.setRange(1, 100)
+        self.points_per_question.setValue(10)
+        self.points_per_question.valueChanged.connect(self.update_fixed_total)
+        form.addRow("Points per Question:", self.points_per_question)
 
-        # Bottom controls
-        bottom_layout = QHBoxLayout()
+        # Use fixed total option
+        self.use_fixed_total = QCheckBox("Use fixed total points")
+        self.use_fixed_total.setChecked(True)
+        form.addRow("", self.use_fixed_total)
 
-        # Total points display
-        self.total_label = QLabel("Total: 0 / 0 points")
-        self.total_label.setStyleSheet("font-size: 14pt; font-weight: bold;")
-        bottom_layout.addWidget(self.total_label)
-        bottom_layout.addStretch()
+        # Fixed total
+        self.fixed_total = QSpinBox()
+        self.fixed_total.setRange(1, 1000)
+        self.fixed_total.setValue(50)
+        form.addRow("Fixed Total Points:", self.fixed_total)
 
-        # Action buttons at the bottom
-        button_container = QWidget()
-        button_container.setObjectName("bottomButtonContainer")  # Add this line
-        button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(8)
+        layout.addLayout(form)
 
-        # Clear button
-        clear_btn = QPushButton("Clear Form")
-        clear_btn.setIcon(qta.icon('fa5s.eraser'))
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                color: #757575;
-                border: 1px solid #BDBDBD;
-                padding-left: 10px;
-            }
-            QPushButton:hover {
-                background-color: #F5F5F5;
-            }
-        """)
-        clear_btn.clicked.connect(self.clear_form)
-        button_layout.addWidget(clear_btn)
+        # Add buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
 
-        # Save button
-        save_btn = QPushButton("Save Assessment")
-        save_btn.setIcon(qta.icon('fa5s.save'))
-        save_btn.clicked.connect(self.save_assessment)
-        button_layout.addWidget(save_btn)
+        # Initial update of the mode description
+        self.update_mode_description()
 
-        # Load assessment button
-        load_assessment_btn = QPushButton("Load Assessment")
-        load_assessment_btn.setIcon(qta.icon('fa5s.file-upload'))
-        load_assessment_btn.clicked.connect(self.load_assessment)
-        button_layout.addWidget(load_assessment_btn)
+    def update_mode_description(self):
+        """Update the description based on the selected grading mode."""
+        mode = self.grading_mode.currentData()
+        if mode == "best_scores":
+            desc = "Automatically use the highest-scoring questions for the final grade."
+        else:
+            desc = "Only count questions that are explicitly selected for grading."
+        self.mode_description.setText(desc)
 
-        bottom_layout.addWidget(button_container)
+    def update_fixed_total(self):
+        """Update the fixed total based on questions and points per question."""
+        self.fixed_total.setValue(self.questions_to_count.value() * self.points_per_question.value())
 
-        main_layout.addLayout(bottom_layout)
-
-        # Create and position the floating action button for saving
-        self.save_fab = FloatingActionButton("save")
-        self.save_fab.setIcon(qta.icon('fa5s.save', color='white'))
-        self.save_fab.setToolTip("Save Assessment")
-        self.save_fab.clicked.connect(self.save_assessment)
-        self.save_fab.setParent(self)  # Must be parented to the main window
+    def get_config(self):
+        """Return the configuration as a dictionary."""
+        return {
+            "grading_mode": self.grading_mode.currentData(),
+            "questions_to_count": self.questions_to_count.value(),
+            "points_per_question": self.points_per_question.value(),
+            "use_fixed_total": self.use_fixed_total.isChecked(),
+            "fixed_total": self.fixed_total.value()
+        }
 
     def toggle_summary_content(self, event):
         """Toggle the visibility of the question summary content."""
@@ -377,15 +450,17 @@ class RubricGrader(QMainWindow):
             "fixed_total": 50  # Default to 50 points total
         }
 
+        # Set window properties for better resizing
+        self.setWindowTitle("Rubric Grading Tool")
+        self.setMinimumSize(800, 600)  # Smaller minimum size
+        self.resize(1000, 700)  # Default size
+
         self.init_ui()
         self.setup_auto_save()
         self.check_for_recovery_files()
 
     def init_ui(self):
         """Set up the user interface."""
-        self.setWindowTitle("Rubric Grading Tool")
-        self.setMinimumSize(1000, 700)
-
         # Set up the status bar
         self.status_bar = StatusBarWidget(self)
         self.setStatusBar(self.status_bar)
@@ -423,13 +498,6 @@ class RubricGrader(QMainWindow):
         self.load_btn.setIcon(qta.icon('fa5s.folder-open'))
         self.load_btn.clicked.connect(self.load_rubric)
         rubric_layout.addWidget(self.load_btn)
-
-        # Save rubric as button (new)
-        self.save_rubric_btn = QPushButton("Save Rubric As...")
-        self.save_rubric_btn.setIcon(qta.icon('fa5s.save'))
-        self.save_rubric_btn.clicked.connect(self.save_rubric_as)
-        self.save_rubric_btn.setEnabled(False)
-        rubric_layout.addWidget(self.save_rubric_btn)
 
         toolbar_layout.addWidget(rubric_group)
 
@@ -484,6 +552,15 @@ class RubricGrader(QMainWindow):
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(8)
+
+        debug_btn = QPushButton("Debug Analytics")
+        debug_btn.clicked.connect(self.debug_analytics)
+        actions_layout.addWidget(debug_btn)
+
+        self.analytics_btn = QPushButton("Analytics")
+        self.analytics_btn.setIcon(qta.icon('fa5s.chart-bar'))
+        self.analytics_btn.clicked.connect(self.show_analytics)
+        actions_layout.addWidget(self.analytics_btn)
 
         # Grading configuration button
         self.config_btn = QPushButton("Grading Config")
@@ -549,13 +626,33 @@ class RubricGrader(QMainWindow):
         self.criteria_layout = QVBoxLayout(self.scroll_content)
         self.criteria_layout.setContentsMargins(16, 16, 16, 16)  # Add padding
         self.scroll_area.setWidget(self.scroll_content)
-        main_layout.addWidget(self.scroll_area)
 
-        # Question summary card
+        # Create the question summary card
         self.question_summary_card = CardWidget("Question Scores Summary")
         self.question_summary_layout = self.question_summary_card.get_content_layout()
-        self.question_summary_card.setVisible(False)
-        main_layout.addWidget(self.question_summary_card)
+
+        # Create a splitter to allow resizing between criteria and summary
+        self.main_splitter = QSplitter(Qt.Vertical)
+
+        # Add the criteria scroll area to the splitter
+        self.main_splitter.addWidget(self.scroll_area)
+
+        # Create a container for the summary section
+        self.summary_container = QWidget()
+        summary_layout = QVBoxLayout(self.summary_container)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Add the question summary card to the container
+        summary_layout.addWidget(self.question_summary_card)
+
+        # Add the summary container to the splitter
+        self.main_splitter.addWidget(self.summary_container)
+
+        # Set initial sizes (adjust as needed)
+        self.main_splitter.setSizes([600, 200])
+
+        # Add the splitter to the main layout
+        main_layout.addWidget(self.main_splitter)
 
         # Bottom controls
         bottom_layout = QHBoxLayout()
@@ -571,6 +668,12 @@ class RubricGrader(QMainWindow):
         button_layout = QHBoxLayout(button_container)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(8)
+        # Batch export button
+        batch_export_btn = QPushButton("Batch Export")
+        batch_export_btn.setIcon(qta.icon('fa5s.file-export'))
+        batch_export_btn.setToolTip("Export multiple assessments to a directory")
+        batch_export_btn.clicked.connect(self.batch_export_assessments)
+        button_layout.addWidget(batch_export_btn)
 
         # Clear button
         clear_btn = QPushButton("Clear Form")
@@ -592,6 +695,7 @@ class RubricGrader(QMainWindow):
         # Save button
         save_btn = QPushButton("Save Assessment")
         save_btn.setIcon(qta.icon('fa5s.save'))
+        save_btn.setToolTip("Save assessment to a file")
         save_btn.clicked.connect(self.save_assessment)
         button_layout.addWidget(save_btn)
 
@@ -605,47 +709,505 @@ class RubricGrader(QMainWindow):
 
         main_layout.addLayout(bottom_layout)
 
-        # Create and position the floating action button for saving
-        self.save_fab = FloatingActionButton("save")
-        self.save_fab.setIcon(qta.icon('fa5s.save', color='white'))  # With white color
-        self.save_fab.setToolTip("Save Assessment")
-        self.save_fab.clicked.connect(self.save_assessment)
-        self.save_fab.setParent(self)
-
-    def showEvent(self, event):
-        """Handle window show event to position floating buttons."""
-        super().showEvent(event)
-
-        # Position the FAB in the bottom right corner with margin
-        margin = 24
-        self.save_fab.move(
-            self.width() - self.save_fab.width() - margin,
-            self.height() - self.save_fab.height() - margin - self.status_bar.height()
+    def debug_analytics(self):
+        """
+        Simple diagnostic function to directly analyze JSON files and display results.
+        """
+        # Let user select a directory containing assessments
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Assessment Directory",
+            "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
         )
 
-    def resizeEvent(self, event):
-        """Handle window resize events."""
-        super().resizeEvent(event)
+        if not directory:
+            QMessageBox.warning(self, "Canceled", "Directory selection canceled.")
+            return
 
-        # Reposition the FAB when the window is resized
-        if hasattr(self, 'save_fab'):
-            margin = 24
+        # Find all JSON files
+        assessment_files = glob.glob(os.path.join(directory, "*.json"))
 
-            # Find bottom button container
-            button_container = self.findChild(QWidget, "bottomButtonContainer")
+        if not assessment_files:
+            QMessageBox.warning(
+                self,
+                "No Files Found",
+                f"No JSON files found in {directory}"
+            )
+            return
 
-            # If we found the button container, position above it
-            if button_container:
-                self.save_fab.move(
-                    self.width() - self.save_fab.width() - margin,
-                    button_container.mapToParent(QPoint(0, 0)).y() - self.save_fab.height() - margin
+        # Show how many files were found
+        QMessageBox.information(
+            self,
+            "Files Found",
+            f"Found {len(assessment_files)} JSON files in {directory}"
+        )
+
+        # Try to process the first file as a test
+        try:
+            with open(assessment_files[0], 'r') as file:
+                data = json.load(file)
+
+            # Show the structure
+            structure_text = f"File: {os.path.basename(assessment_files[0])}\n\n"
+            structure_text += f"Keys: {', '.join(data.keys())}\n\n"
+
+            # Check for criteria
+            if "criteria" in data:
+                structure_text += f"Criteria count: {len(data['criteria'])}\n\n"
+
+                # Look at the first criterion
+                if data["criteria"]:
+                    first_criterion = data["criteria"][0]
+                    structure_text += f"First criterion keys: {', '.join(first_criterion.keys())}\n\n"
+                    structure_text += f"Title: {first_criterion.get('title', 'N/A')}\n"
+                    structure_text += f"Points: {first_criterion.get('points_awarded', 'N/A')} / {first_criterion.get('points_possible', 'N/A')}\n"
+
+            # Display the structure
+            QMessageBox.information(
+                self,
+                "JSON Structure",
+                structure_text
+            )
+
+            # Try to count questions
+            question_data = {}
+            total_students = len(assessment_files)
+
+            for file_path in assessment_files[:10]:  # Limit to 10 files for quick testing
+                try:
+                    with open(file_path, 'r') as file:
+                        assessment = json.load(file)
+
+                    for criterion in assessment.get("criteria", []):
+                        title = criterion.get("title", "")
+                        match = re.search(r"Question\s+(\d+)", title)
+
+                        if match:
+                            q_num = match.group(1)
+
+                            if q_num not in question_data:
+                                question_data[q_num] = {
+                                    "scores": [],
+                                    "title": title,
+                                    "max_points": criterion.get("points_possible", 0)
+                                }
+
+                            question_data[q_num]["scores"].append(criterion.get("points_awarded", 0))
+                except Exception as e:
+                    print(f"Error processing {file_path}: {str(e)}")
+
+            # Display found questions
+            questions_text = f"Found {len(question_data)} questions across {min(total_students, 10)} assessments:\n\n"
+
+            for q_num, data in question_data.items():
+                questions_text += f"Question {q_num}:\n"
+                questions_text += f"  Title: {data['title']}\n"
+                questions_text += f"  Scores: {data['scores']}\n"
+                questions_text += f"  Max Points: {data['max_points']}\n\n"
+
+            QMessageBox.information(
+                self,
+                "Question Data",
+                questions_text
+            )
+
+            # Create a simple matplotlib plot directly
+            if question_data:
+                plt.figure(figsize=(10, 6))
+
+                # Get the first question for testing
+                first_q = list(question_data.keys())[0]
+                q_data = question_data[first_q]
+
+                # Calculate percentages
+                percentages = []
+                for score in q_data["scores"]:
+                    if q_data["max_points"] > 0:
+                        percentages.append((score / q_data["max_points"]) * 100)
+                    else:
+                        percentages.append(0)
+
+                # Create histogram
+                plt.hist(percentages, bins=5, alpha=0.7, range=(0, 100),
+                         color='blue', edgecolor='black')
+
+                plt.title(f"Score Distribution for {q_data['title']}")
+                plt.xlabel("Score (%)")
+                plt.ylabel("Number of Students")
+                plt.grid(axis='y', alpha=0.75)
+
+                # Save to a file
+                output_file = os.path.join(directory, "histogram_test.png")
+                plt.savefig(output_file)
+                plt.close()
+
+                QMessageBox.information(
+                    self,
+                    "Plot Created",
+                    f"Created a test histogram at:\n{output_file}"
                 )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Processing JSON",
+                f"Error: {str(e)}"
+            )
+
+    def batch_export_assessments(self):
+        """
+        Batch export feature to save multiple student assessments to a designated directory.
+        This creates a structured dataset that can be used for analytics.
+        """
+        # Open a dialog to select the export directory
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Export Directory",
+            "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if not export_dir:
+            return
+
+        # Create a dialog to get a list of assessment files
+        file_dialog = QFileDialog(self)
+        file_dialog.setWindowTitle("Select Assessment Files")
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter("Assessment Files (*.json)")
+
+        if not file_dialog.exec_():
+            return
+
+        selected_files = file_dialog.selectedFiles()
+
+        if not selected_files:
+            return
+
+        # Create a subdirectory for the current date
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        batch_dir = os.path.join(export_dir, f"batch_{timestamp}")
+
+        try:
+            if not os.path.exists(batch_dir):
+                os.makedirs(batch_dir)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to create export directory: {str(e)}"
+            )
+            return
+
+        # Export each assessment
+        progress = QProgressDialog("Exporting assessments...", "Cancel", 0, len(selected_files), self)
+        progress.setWindowTitle("Batch Export")
+        progress.setWindowModality(Qt.WindowModal)
+
+        exported_count = 0
+
+        for i, file_path in enumerate(selected_files):
+            progress.setValue(i)
+            if progress.wasCanceled():
+                break
+
+            try:
+                with open(file_path, 'r') as file:
+                    assessment = json.load(file)
+
+                # Generate a filename for the output
+                student_name = assessment.get("student_name", "unnamed")
+                safe_student = ''.join(c if c.isalnum() else '_' for c in student_name)
+
+                # Save JSON
+                output_json = os.path.join(batch_dir, f"{safe_student}.json")
+                with open(output_json, 'w') as file:
+                    json.dump(assessment, file, indent=2)
+
+                # Generate PDF if requested
+                # (This functionality could be made optional with a checkbox)
+                output_pdf = os.path.join(batch_dir, f"{safe_student}.pdf")
+                try:
+                    from utils.pdf_generator import generate_assessment_pdf
+                    generate_assessment_pdf(output_pdf, assessment)
+                except Exception as pdf_error:
+                    print(f"PDF generation failed: {str(pdf_error)}")
+
+                exported_count += 1
+
+            except Exception as e:
+                print(f"Error processing {file_path}: {str(e)}")
+
+        progress.setValue(len(selected_files))
+
+        # Create batch summary file
+        try:
+            summary_path = os.path.join(batch_dir, "batch_info.json")
+            with open(summary_path, 'w') as file:
+                summary = {
+                    "export_date": timestamp,
+                    "file_count": exported_count,
+                    "assignment_name": self.assignment_name_edit.text() or "Unknown Assignment"
+                }
+                json.dump(summary, file, indent=2)
+        except Exception as e:
+            print(f"Failed to create batch summary: {str(e)}")
+
+        # Show success message
+        QMessageBox.information(
+            self,
+            "Export Complete",
+            f"Successfully exported {exported_count} assessments to {batch_dir}"
+        )
+
+    def collect_assessments(self):
+        """
+        Collect and process assessment data from a directory of JSON files.
+        Returns a dictionary with aggregated assessment data.
+        """
+        # Let user select a directory containing assessments
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Assessment Directory",
+            "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if not directory:
+            return None
+
+        # Find all assessment JSON files in the directory
+        assessment_files = glob.glob(os.path.join(directory, "*.json"))
+
+        if not assessment_files:
+            QMessageBox.warning(
+                self,
+                "No Assessments Found",
+                "No assessment files (*.json) were found in the selected directory."
+            )
+            return None
+
+        # Initialize data structures
+        question_data = {}
+        assignment_name = ""
+        total_students = len(assessment_files)
+
+        # Process each assessment file
+        progress = QProgressDialog("Loading assessments...", "Cancel", 0, len(assessment_files), self)
+        progress.setWindowTitle("Loading Assessments")
+        progress.setWindowModality(Qt.WindowModal)
+
+        for i, file_path in enumerate(assessment_files):
+            progress.setValue(i)
+            if progress.wasCanceled():
+                break
+
+            try:
+                with open(file_path, 'r') as file:
+                    assessment = json.load(file)
+
+                    # Use the assignment name from the first valid assessment
+                    if not assignment_name and "assignment_name" in assessment:
+                        assignment_name = assessment["assignment_name"]
+
+                    # Process question data from criteria
+                    for criterion in assessment.get("criteria", []):
+                        title = criterion.get("title", "")
+                        # Match question numbers like "Question 1: Topic" or "Question 1a"
+                        match = re.search(r"Question\s+(\d+)", title)
+
+                        if match:
+                            q_num = match.group(1)
+
+                            if q_num not in question_data:
+                                question_data[q_num] = {
+                                    "scores": [],
+                                    "title": title,
+                                    "max_points": criterion.get("points_possible", 0)
+                                }
+
+                            # Add score
+                            question_data[q_num]["scores"].append(criterion.get("points_awarded", 0))
+
+                            # Update max points if needed
+                            if criterion.get("points_possible", 0) > question_data[q_num]["max_points"]:
+                                question_data[q_num]["max_points"] = criterion.get("points_possible", 0)
+
+            except Exception as e:
+                print(f"Error processing {file_path}: {str(e)}")
+
+        progress.setValue(len(assessment_files))
+
+        # Calculate overall scores
+        overall_scores = []
+        for i in range(min(total_students, len(assessment_files))):
+            # Try to get direct overall scores if available
+            try:
+                with open(assessment_files[i], 'r') as file:
+                    assessment = json.load(file)
+
+                if "total_awarded" in assessment and "total_possible" in assessment:
+                    if assessment["total_possible"] > 0:
+                        percentage = (assessment["total_awarded"] / assessment["total_possible"]) * 100
+                        overall_scores.append(percentage)
+                        continue
+
+                # Otherwise calculate from criteria
+                student_total_awarded = 0
+                student_total_possible = 0
+
+                for criterion in assessment.get("criteria", []):
+                    student_total_awarded += criterion.get("points_awarded", 0)
+                    student_total_possible += criterion.get("points_possible", 0)
+
+                if student_total_possible > 0:
+                    percentage = (student_total_awarded / student_total_possible) * 100
+                    overall_scores.append(percentage)
+
+            except Exception as e:
+                print(f"Error calculating overall score for student {i + 1}: {str(e)}")
+
+        # Return the collected data
+        return {
+            "question_data": question_data,
+            "assignment_name": assignment_name,
+            "file_count": len(assessment_files),
+            "overall_data": {
+                "overall_scores": overall_scores,
+                "num_students": len(overall_scores)
+            }
+        }
+
+    def process_question_data(self, question_data, assessment):
+        """
+        Process question data from an assessment with your specific JSON format.
+        """
+        for criterion in assessment.get("criteria", []):
+            # Extract question number using regex
+            title = criterion.get("title", "")
+            match = re.search(r"Question\s+(\d+)", title)
+            if not match:
+                continue
+
+            q_num = match.group(1)
+
+            if q_num not in question_data:
+                question_data[q_num] = {
+                    "scores": [],
+                    "percentages": [],
+                    "max_points": criterion.get("points_possible", 0),
+                    "num_students": 0,
+                    "question_title": title
+                }
+
+            # Add score
+            awarded = criterion.get("points_awarded", 0)
+            possible = criterion.get("points_possible", 0)
+            question_data[q_num]["scores"].append(awarded)
+
+            # Calculate percentage
+            if possible > 0:
+                percentage = (awarded / possible) * 100
             else:
-                # Default positioning
-                self.save_fab.move(
-                    self.width() - self.save_fab.width() - margin,
-                    self.height() - self.save_fab.height() - margin - self.status_bar.height() - 50
-                )
+                percentage = 0
+            question_data[q_num]["percentages"].append(percentage)
+
+            # Update max points if needed
+            if possible > question_data[q_num]["max_points"]:
+                question_data[q_num]["max_points"] = possible
+
+            # Increment student count
+            question_data[q_num]["num_students"] += 1
+
+    def is_valid_assessment(self, assessment):
+        """
+        Check if the given dictionary is a valid assessment.
+        """
+        # Check for minimum required fields for your JSON format
+        required_fields = ["student_name", "criteria"]
+
+        for field in required_fields:
+            if field not in assessment:
+                return False
+
+        # Check if criteria contains question data
+        has_questions = False
+        for criterion in assessment.get("criteria", []):
+            if "Question" in criterion.get("title", ""):
+                has_questions = True
+                break
+
+        return has_questions
+
+    def gather_analytics_data(self):
+        """
+        Gather data for analytics from loaded assessments.
+        """
+        # Try to collect real assessment data
+        collected_data = self.collect_assessments()
+
+        if collected_data:
+            return collected_data
+
+        # If user canceled or no data found, generate sample data
+        # (same sample data generation as before)
+        question_data = {}
+
+        # Create sample data for each question
+        for q in self.question_groups.keys():
+            # Generate random scores (in a real app, these would come from saved assessments)
+            num_students = 30  # Sample size
+            max_points = sum(widget.get_possible_points() for widget in self.question_groups[q])
+
+            # Generate random scores with a normal distribution
+            mean_percent = 70  # Mean score (as percentage)
+            std_dev = 15  # Standard deviation
+
+            # Generate scores and clip to valid range
+            scores = np.random.normal(mean_percent * max_points / 100,
+                                      std_dev * max_points / 100,
+                                      num_students)
+            scores = np.clip(scores, 0, max_points)
+
+            # Calculate percentages
+            percentages = [(s / max_points * 100) for s in scores]
+
+            question_data[q] = {
+                "scores": scores,
+                "percentages": percentages,
+                "max_points": max_points,
+                "num_students": num_students
+            }
+
+        # Generate overall scores
+        overall_scores = np.random.normal(70, 15, num_students)
+        overall_scores = np.clip(overall_scores, 0, 100)
+
+        return {
+            "question_data": question_data,
+            "overall_data": {
+                "overall_scores": overall_scores,
+                "num_students": num_students
+            },
+            "assignment_name": "Sample Data"
+        }
+
+    def show_analytics(self):
+        """Show the analytics dialog with student performance data."""
+        # Gather analytics data
+        analytics_data = self.collect_assessments()
+
+        if analytics_data:
+            # Create and show dialog
+            dialog = AnalyticsDialog(self, analytics_data)
+            dialog.exec_()
+        else:
+            QMessageBox.warning(
+                self,
+                "No Data Available",
+                "No assessment data was found or selected. Please try again."
+            )
 
     def setup_auto_save(self):
         """Set up the auto-save timer."""
@@ -849,41 +1411,7 @@ class RubricGrader(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Recovery Failed", f"Could not recover the auto-save: {str(e)}")
 
-    def save_rubric_as(self):
-        """Save the current rubric to a new file."""
-        if not self.rubric_data:
-            QMessageBox.warning(self, "Warning", "No rubric loaded to save.")
-            return
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Rubric As",
-            "",
-            "JSON Files (*.json);;All Files (*)"
-        )
-
-        if not file_path:
-            return
-
-        # Ensure .json extension
-        if not file_path.lower().endswith('.json'):
-            file_path += '.json'
-
-        # Get current rubric data with any modifications
-        current_rubric = self.get_current_rubric_data()
-
-        try:
-            with open(file_path, 'w') as file:
-                json.dump(current_rubric, file, indent=2)
-
-            # Update the current rubric path
-            self.rubric_file_path = file_path
-
-            self.status_bar.set_status(f"Rubric saved as: {os.path.basename(file_path)}")
-            self.status_bar.show_temporary_message("Rubric saved successfully")
-            QMessageBox.information(self, "Success", "Rubric saved successfully.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save rubric: {str(e)}")
 
     def get_current_rubric_data(self):
         """Gather the current rubric data with any modifications."""
@@ -976,7 +1504,10 @@ class RubricGrader(QMainWindow):
             self.setup_rubric_ui()
             self.export_btn.setEnabled(True)
             self.config_btn.setEnabled(True)
-            self.save_rubric_btn.setEnabled(True)  # Enable Save As button
+            self.status_bar.set_status(f"Loaded rubric: {os.path.basename(file_path)}")
+            self.status_label.setText(f"Loaded rubric: {os.path.basename(file_path)}")
+            self.analytics_btn.setEnabled(True)
+
             self.status_bar.set_status(f"Loaded rubric: {os.path.basename(file_path)}")
             self.status_label.setText(f"Loaded rubric: {os.path.basename(file_path)}")
 
@@ -992,6 +1523,7 @@ class RubricGrader(QMainWindow):
         self.clear_layout(self.criteria_layout)
         self.criterion_widgets = []
         self.question_groups = {}
+        self.question_summary_card.setVisible(True)
 
         if not self.rubric_data or "criteria" not in self.rubric_data:
             self.status_bar.set_status("Invalid rubric format.")
@@ -1034,6 +1566,8 @@ class RubricGrader(QMainWindow):
 
         # Update config info with question count
         self.update_config_info()
+
+        self.update_question_summary()
 
     def extract_main_questions(self):
         """Extract and return list of main question identifiers from criteria titles."""
@@ -1185,7 +1719,7 @@ class RubricGrader(QMainWindow):
         return [q for q, cb in self.question_checkboxes.items() if cb.isChecked()]
 
     def update_question_summary(self):
-        """Update the question summary display showing scores per question."""
+        """Update the question summary display using a proper QTableWidget."""
         # Clear existing summary
         self.clear_layout(self.question_summary_layout)
 
@@ -1193,6 +1727,7 @@ class RubricGrader(QMainWindow):
             self.question_summary_card.setVisible(False)
             return
 
+        # Make the card visible
         self.question_summary_card.setVisible(True)
 
         # Calculate scores for each question
@@ -1211,35 +1746,29 @@ class RubricGrader(QMainWindow):
             self.question_summary_layout.addWidget(no_data_label)
             return
 
-        # Create a styled table for the summary
-        table_frame = QFrame()
-        table_frame.setStyleSheet("""
-                QFrame {
-                    background-color: white;
-                    border-radius: 4px;
-                    border: 1px solid #E0E0E0;
-                }
-            """)
-        table_layout = QVBoxLayout(table_frame)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.setSpacing(0)
+        # Create a proper table widget for the summary
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setRowCount(len(question_scores))
+        table.setHorizontalHeaderLabels(["Question", "Score", "Percentage", "Status"])
 
-        # Table header
-        header_frame = QFrame()
-        header_frame.setStyleSheet("background-color: #F5F5F5; border-bottom: 1px solid #E0E0E0;")
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(16, 8, 16, 8)
-
-        header_labels = ["Question", "Score", "Percentage", "Status"]
-        widths = [1, 1, 1, 2]  # Relative widths
-
-        for i, label_text in enumerate(header_labels):
-            label = QLabel(label_text)
-            label.setStyleSheet("font-weight: bold;")
-            label.setAlignment(Qt.AlignLeft if i == 3 else Qt.AlignCenter)
-            header_layout.addWidget(label, widths[i])
-
-        table_layout.addWidget(header_frame)
+        # Set table properties
+        table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #DDDDDD;
+                gridline-color: #DDDDDD;
+                background-color: white;
+            }
+            QTableWidget::item {
+                padding: 6px;
+            }
+            QHeaderView::section {
+                background-color: #F5F5F5;
+                padding: 6px;
+                font-weight: bold;
+                border: 1px solid #DDDDDD;
+            }
+        """)
 
         # Determine which questions are counted in the final score
         questions_to_count = self.grading_config["questions_to_count"]
@@ -1261,78 +1790,59 @@ class RubricGrader(QMainWindow):
             best_questions = selected_questions
 
         # Add table rows for each question
-        for q in sorted(question_scores.keys()):
+        for row, q in enumerate(sorted(question_scores.keys())):
             awarded, possible, percentage = question_scores[q]
 
-            row_frame = QFrame()
-            row_frame.setStyleSheet("""
-                QFrame:hover {
-                    background-color: #F5F5F5;
-                }
-                QFrame {
-                    border-bottom: 1px solid #EEEEEE;
-                }
-            """)
-            row_layout = QHBoxLayout(row_frame)
-            row_layout.setContentsMargins(16, 12, 16, 12)
-
             # Question number
-            q_label = QLabel(f"Question {q}")
-            q_label.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(q_label, widths[0])
+            q_item = QTableWidgetItem(f"Question {q}")
+            q_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 0, q_item)
 
             # Score
-            score_label = QLabel(f"{awarded} / {possible}")
-            score_label.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(score_label, widths[1])
+            score_item = QTableWidgetItem(f"{awarded} / {possible}")
+            score_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 1, score_item)
 
             # Percentage
-            pct_label = QLabel(f"{percentage:.1f}%")
-            pct_label.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(pct_label, widths[2])
+            pct_item = QTableWidgetItem(f"{percentage:.1f}%")
+            pct_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 2, pct_item)
 
-            # Status (counted in final score or not)
-            status_label = QLabel()
-            status_label.setAlignment(Qt.AlignLeft)
-
+            # Status
             if q in selected_questions:
                 if q in best_questions:
                     status = "Counted in final score"
-                    status_label.setText(status)
-                    status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")  # Green
+                    status_item = QTableWidgetItem(status)
+                    status_item.setForeground(QColor("#4CAF50"))  # Green
+                    status_item.setFont(QFont("", -1, QFont.Bold))
                 else:
-                    status = "Selected but not counted (better scores exist)"
-                    status_label.setText(status)
-                    status_label.setStyleSheet("color: #FF9800;")  # Orange
+                    status = "Selected but not counted"
+                    status_item = QTableWidgetItem(status)
+                    status_item.setForeground(QColor("#FF9800"))  # Orange
             else:
                 status = "Not selected for grading"
-                status_label.setText(status)
-                status_label.setStyleSheet("color: #9E9E9E;")  # Gray
+                status_item = QTableWidgetItem(status)
+                status_item.setForeground(QColor("#9E9E9E"))  # Gray
 
-            row_layout.addWidget(status_label, widths[3])
+            status_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            table.setItem(row, 3, status_item)
 
-            table_layout.addWidget(row_frame)
+        # Auto-adjust column widths
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
 
-        self.question_summary_layout.addWidget(table_frame)
+        # Add the table to the layout
+        self.question_summary_layout.addWidget(table)
 
         # Add note about best scores if applicable
         if self.grading_config["grading_mode"] == "best_scores":
-            note_frame = QFrame()
-            note_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #E8EAF6;
-                    border-radius: 4px;
-                    padding: 8px;
-                    margin-top: 12px;
-                }
-            """)
-            note_layout = QVBoxLayout(note_frame)
-
             note = QLabel(f"Note: Final score uses the {questions_to_count} highest-scoring questions.")
-            note.setStyleSheet("color: #3F51B5; font-style: italic;")
-            note_layout.addWidget(note)
-
-            self.question_summary_layout.addWidget(note_frame)
+            note.setStyleSheet(
+                "color: #3F51B5; font-style: italic; background-color: #E8EAF6; padding: 8px; border-radius: 4px;")
+            self.question_summary_layout.addWidget(note)
 
     def update_total_points(self):
         """Update the total points display based on selected questions and mode."""

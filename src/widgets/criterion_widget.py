@@ -5,8 +5,7 @@ This module defines the UI component that represents a single criterion in the r
 """
 
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                             QSpinBox, QCheckBox, QGroupBox, QTextEdit)
-from PyQt5.QtGui import QFont
+                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
 
 
@@ -210,7 +209,10 @@ class CriterionWidget(QFrame):
         layout.addWidget(QLabel("Comments:"))
         self.comments_edit = QTextEdit()
         self.comments_edit.setPlaceholderText("Add your feedback here...")
-        self.comments_edit.setMaximumHeight(100)  # Limit height
+        self.comments_edit.setMinimumHeight(80)  # Set minimum height instead
+        # Set size policy to allow vertical expansion
+        size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.comments_edit.setSizePolicy(size_policy)
         layout.addWidget(self.comments_edit)
 
         self.setLayout(layout)
