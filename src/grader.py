@@ -487,7 +487,6 @@ class GradingConfigDialog(QDialog):
             "fixed_total": self.fixed_total.value()
         }
 
-
 class RubricGrader(QMainWindow):
     """Main application window for the Rubric Grading Tool."""
 
@@ -525,7 +524,9 @@ class RubricGrader(QMainWindow):
 
         self.init_ui()
         self.setup_auto_save()
-        self.check_for_recovery_files()
+        # Schedule the check using a timer after the constructor returns
+        # Using a small delay (e.g., 50-100ms) ensures the main event loop is running
+        # QTimer.singleShot(100, self.check_for_recovery_files)
 
     def init_ui(self):
         """Set up the user interface."""
@@ -621,9 +622,9 @@ class RubricGrader(QMainWindow):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(8)
 
-        debug_btn = QPushButton("Debug Analytics")
-        debug_btn.clicked.connect(self.debug_analytics)
-        actions_layout.addWidget(debug_btn)
+        # debug_btn = QPushButton("Debug Analytics")
+        # debug_btn.clicked.connect(self.debug_analytics)
+        # actions_layout.addWidget(debug_btn)
 
         self.analytics_btn = QPushButton("Analytics")
         self.analytics_btn.setIcon(qta.icon('fa5s.chart-bar'))
@@ -1302,11 +1303,11 @@ class RubricGrader(QMainWindow):
         file_path = os.path.join(self.auto_save_dir, filename)
 
         # Add auto-save metadata
-        assessment_data["auto_save"] = {
-            "timestamp": timestamp,
-            "rubric_path": self.rubric_file_path,
-            "is_auto_save": True
-        }
+        # assessment_data["auto_save"] = {
+        #     "timestamp": timestamp,
+        #     "rubric_path": self.rubric_file_path,
+        #     "is_auto_save": True
+        # }
 
         try:
             with open(file_path, 'w') as file:
@@ -1345,143 +1346,9 @@ class RubricGrader(QMainWindow):
             # Silently fail - this is just cleanup
             pass
 
-    def check_for_recovery_files(self):
-        """Check for auto-save files that might need recovery on startup."""
-        try:
-            recovery_files = []
-            cutoff_time = time.time() - (24 * 60 * 60)  # Files from last 24 hours
 
-            for filename in os.listdir(self.auto_save_dir):
-                if filename.startswith("autosave_") and filename.endswith(".json"):
-                    file_path = os.path.join(self.auto_save_dir, filename)
-                    mod_time = os.path.getmtime(file_path)
 
-                    if mod_time > cutoff_time:
-                        try:
-                            with open(file_path, 'r') as file:
-                                data = json.load(file)
 
-                                # Extract student name and timestamp
-                                student_name = data.get("student_name", "Unnamed Student")
-                                timestamp = data.get("auto_save", {}).get("timestamp", 0)
-                                if timestamp:
-                                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
-                                    recovery_files.append((file_path, student_name, time_str))
-                        except Exception:
-                            # Skip invalid files
-                            continue
-
-            # If we found recovery files, ask the user
-            if recovery_files:
-                message = "Auto-saved assessments were found. Would you like to recover one?\n\n"
-                for i, (_, student, time_str) in enumerate(recovery_files):
-                    message += f"{i + 1}. {student} - {time_str}\n"
-
-                reply = QMessageBox.question(
-                    self,
-                    "Recovery Available",
-                    message,
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-
-                if reply == QMessageBox.Yes:
-                    # Create a simple dialog to let user choose which file to recover
-                    # Create a simple dialog to let user choose which file to recover
-                    dialog = QDialog(self)
-                    dialog.setWindowTitle("Select Recovery File")
-                    dialog.setMinimumWidth(400)
-                    dialog.setStyleSheet("""
-                        QDialog {
-                            background-color: white;
-                        }
-                        QLabel {
-                            font-weight: bold;
-                            margin-bottom: 10px;
-                        }
-                    """)
-                    layout = QVBoxLayout(dialog)
-
-                    # Add title
-                    title = QLabel("Select an auto-saved assessment to recover:")
-                    title.setProperty("labelType", "heading")
-                    layout.addWidget(title)
-
-                    # Create combo box
-                    combo = QComboBox()
-                    combo.setMinimumHeight(30)  # Make it taller
-                    for _, student, time_str in recovery_files:
-                        combo.addItem(f"{student} - {time_str}")
-                    layout.addWidget(combo)
-
-                    # Add some spacing
-                    spacer = QWidget()
-                    spacer.setMinimumHeight(20)
-                    layout.addWidget(spacer)
-
-                    # Add buttons
-                    buttons = QHBoxLayout()
-                    cancel_btn = QPushButton("Cancel")
-                    cancel_btn.clicked.connect(dialog.reject)
-                    buttons.addWidget(cancel_btn)
-
-                    recover_btn = QPushButton("Recover")
-                    recover_btn.clicked.connect(dialog.accept)
-                    recover_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: #3F51B5;
-                            color: white;
-                        }
-                    """)
-                    buttons.addWidget(recover_btn)
-                    layout.addLayout(buttons)
-
-                    if dialog.exec_() == QDialog.Accepted:
-                        index = combo.currentIndex()
-                        if 0 <= index < len(recovery_files):
-                            self.recover_auto_save_file(recovery_files[index][0])
-        except Exception as e:
-            # If anything goes wrong with recovery, just log it and continue
-            print(f"Recovery check failed: {str(e)}")
-
-    def recover_auto_save_file(self, file_path):
-        """Load a specific auto-save file for recovery."""
-        try:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-
-            # Check if we need to load the associated rubric first
-            rubric_path = data.get("auto_save", {}).get("rubric_path")
-            if rubric_path and os.path.exists(rubric_path):
-                self.load_rubric(rubric_path)
-
-            # Now load the assessment data
-            self.student_name_edit.setText(data.get("student_name", ""))
-            self.assignment_name_edit.setText(data.get("assignment_name", ""))
-
-            # Load grading configuration if present
-            if "grading_config" in data:
-                self.grading_config = data["grading_config"]
-                self.update_config_info()
-
-            # Update question selection if it exists
-            selected_questions = data.get("selected_questions", [])
-            if hasattr(self, 'question_checkboxes') and selected_questions:
-                for q, checkbox in self.question_checkboxes.items():
-                    checkbox.setChecked(q in selected_questions)
-
-            # Fill in criteria data
-            criteria_data = data.get("criteria", [])
-            if len(criteria_data) == len(self.criterion_widgets):
-                for i, criterion_data in enumerate(criteria_data):
-                    widget = self.criterion_widgets[i]
-                    widget.set_data(criterion_data)
-
-            self.update_total_points()
-            self.status_bar.set_status("Assessment recovered from auto-save")
-            self.status_bar.show_temporary_message("Assessment successfully recovered")
-        except Exception as e:
-            QMessageBox.warning(self, "Recovery Failed", f"Could not recover the auto-save: {str(e)}")
 
 
 
@@ -1557,7 +1424,7 @@ class RubricGrader(QMainWindow):
             # Update total points display
             self.update_total_points()
 
-    def load_rubric(self, file_path=None):
+    def load_rubric(self, file_path=None, show_config_on_load=True):
         """Load a rubric from a file (JSON or CSV)."""
         if not file_path:
             file_path, _ = QFileDialog.getOpenFileName(
@@ -1583,8 +1450,9 @@ class RubricGrader(QMainWindow):
             self.status_bar.set_status(f"Loaded rubric: {os.path.basename(file_path)}")
             self.status_label.setText(f"Loaded rubric: {os.path.basename(file_path)}")
 
-            # Show grading config dialog for initial setup
-            self.show_grading_config()
+            # Only show grading config if the flag is True
+            if show_config_on_load:
+                self.show_grading_config()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load rubric: {str(e)}")

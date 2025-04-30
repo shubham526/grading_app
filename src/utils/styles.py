@@ -46,6 +46,7 @@ def apply_material_style(app):
     app.setFont(font)
 
     # Apply stylesheet for more control
+    # NOTE: The problematic section with stray characters/comments has been removed below.
     app.setStyleSheet("""
         QPushButton {
             border: none;
@@ -113,7 +114,7 @@ def apply_material_style(app):
             background-color: #3F51B5;
             color: white;
         }
-        
+
         /* Fix for QComboBox dropdown issues */
         QComboBox {
             border: 1px solid #BDBDBD;
@@ -145,46 +146,6 @@ def apply_material_style(app):
             padding-left: 10px;
             padding-right: 10px;
         }
-
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        ;
-        
-        
-        
-        
-        
-        
-        ght */
-        */
-        
-        
-        ted {
-        
-        
-        
-        
-        
-        
 
         /* Fix for toolbar navigation buttons */
         QToolButton {
