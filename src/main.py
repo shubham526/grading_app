@@ -6,42 +6,36 @@ This module initializes and launches the Rubric Grading application.
 """
 
 import sys
+import os
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtCore import QTimer
 
 from grader import RubricGrader
-
-
-def setup_application_style(app):
-    """Set up the application's visual style and color palette."""
-    # Use Fusion style for a modern, cross-platform look
-    app.setStyle("Fusion")
-
-    # Create a clean, professional color palette
-    palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(240, 240, 240))
-    palette.setColor(QPalette.WindowText, QColor(51, 51, 51))
-    palette.setColor(QPalette.Base, QColor(255, 255, 255))
-    palette.setColor(QPalette.AlternateBase, QColor(247, 247, 247))
-    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
-    palette.setColor(QPalette.ToolTipText, QColor(51, 51, 51))
-    palette.setColor(QPalette.Text, QColor(51, 51, 51))
-    palette.setColor(QPalette.Button, QColor(240, 240, 240))
-    palette.setColor(QPalette.ButtonText, QColor(51, 51, 51))
-    palette.setColor(QPalette.Link, QColor(0, 102, 204))
-    palette.setColor(QPalette.Highlight, QColor(0, 102, 204))
-    palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
-
-    app.setPalette(palette)
+from utils.styles import apply_material_style
+from utils.splash_screen import EnhancedSplashScreen
 
 
 def main():
     """Main application entry point."""
     app = QApplication(sys.argv)
-    setup_application_style(app)
+    apply_material_style(app)  # Apply our custom Material Design style
 
-    window = RubricGrader()
-    window.show()
+    # Create and show enhanced splash screen
+    splash = EnhancedSplashScreen()
+    splash.show()
+    app.processEvents()
+
+    # Create the main window with a splash animation
+    window = None
+
+    def show_main_window():
+        nonlocal window
+        window = RubricGrader()
+        window.show()
+        splash.finish(window)
+
+    # Run the startup sequence with callback
+    splash.run_startup_sequence(show_main_window)
 
     sys.exit(app.exec_())
 
