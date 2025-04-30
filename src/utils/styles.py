@@ -65,13 +65,13 @@ def apply_material_style(app):
             background-color: #C5CAE9;
             color: #9FA8DA;
         }
-        QLineEdit, QSpinBox, QTextEdit, QComboBox {
+        QLineEdit, QSpinBox, QTextEdit {
             border: 1px solid #BDBDBD;
             border-radius: 4px;
             padding: 6px;
             background-color: white;
         }
-        QLineEdit:focus, QSpinBox:focus, QTextEdit:focus, QComboBox:focus {
+        QLineEdit:focus, QSpinBox:focus, QTextEdit:focus {
             border: 2px solid #3F51B5;
         }
         QGroupBox {
@@ -112,5 +112,112 @@ def apply_material_style(app):
         QStatusBar {
             background-color: #3F51B5;
             color: white;
+        }
+        
+        /* Fix for QComboBox dropdown issues */
+        QComboBox {
+            border: 1px solid #BDBDBD;
+            border-radius: 4px;
+            padding: 6px;
+            background-color: white;
+            min-height: 25px;
+        }
+        QComboBox:focus {
+            border: 2px solid #3F51B5;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 25px;
+            border-left: 1px solid #BDBDBD;
+        }
+        QComboBox QAbstractItemView {
+            border: 1px solid #BDBDBD;
+            selection-background-color: #3F51B5;
+            selection-color: white;
+            background-color: white;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 30px;
+            padding: 5px;
+        }
+        QComboBox QListView::item {
+            padding-left: 10px;
+            padding-right: 10px;
+        }
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        ;
+        
+        
+        
+        
+        
+        
+        ght */
+        */
+        
+        
+        ted {
+        
+        
+        
+        
+        
+        
+
+        /* Fix for toolbar navigation buttons */
+        QToolButton {
+            background-color: transparent;
+            border: 1px solid #BDBDBD;
+            border-radius: 4px;
+            padding: 3px;
+        }
+        QToolButton:hover {
+            background-color: #E8EAF6;
+        }
+        QToolButton:pressed {
+            background-color: #C5CAE9;
+        }
+        QToolButton:checked {
+            background-color: #C5CAE9;
+        }
+
+        /* Specifically target the matplotlib navigation toolbar buttons */
+        NavigationToolbar2QT QToolButton {
+            background-color: white;
+            border: 1px solid #BDBDBD;
+            border-radius: 4px;
+            padding: 4px;
+            margin: 2px;
+        }
+        NavigationToolbar2QT QToolButton:hover {
+            background-color: #E8EAF6;
+        }
+        NavigationToolbar2QT QToolButton:pressed {
+            background-color: #C5CAE9;
+        }
+        NavigationToolbar2QT QToolButton:checked {
+            background-color: #C5CAE9;
         }
     """)

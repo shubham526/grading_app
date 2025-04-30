@@ -1,17 +1,15 @@
-import os
-import json
+
 import tempfile
 import time
-import glob
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QFileDialog, QScrollArea,
                              QLineEdit, QMessageBox, QGroupBox, QCheckBox,
-                             QSpinBox, QDialog, QFormLayout, QComboBox, QFrame, QDialogButtonBox, QSplitter)
+                             QSpinBox, QDialog, QFormLayout, QComboBox, QFrame, QDialogButtonBox, QSplitter,
+                             QStyledItemDelegate, QListView)
 from PyQt5.QtWidgets import (QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QProgressDialog, QSlider)
 
-
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QEvent
 import qtawesome as qta
 from PyQt5.QtGui import QColor, QFont
 import matplotlib.pyplot as plt
@@ -35,6 +33,55 @@ from utils.rubric_parser import parse_rubric_file
 from utils.pdf_generator import generate_assessment_pdf
 from utils.styles import COLORS
 
+
+class BetterComboBox(QComboBox):
+    """A ComboBox with improved dropdown behavior."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Set a list view with better item rendering
+        list_view = QListView()
+        list_view.setTextElideMode(Qt.ElideNone)  # Prevent text from being cut off
+        self.setView(list_view)
+
+        # Use a delegate for better item display
+        delegate = QStyledItemDelegate()
+        self.setItemDelegate(delegate)
+
+    def showPopup(self):
+        """Improve popup display."""
+        super().showPopup()
+        popup = self.findChild(QFrame)
+        if popup:
+            # Make popup wider to ensure text fits
+            width = max(self.width() + 50, 300)
+            popup.setMinimumWidth(width)
+            # Set a larger maximum height
+            popup.setMaximumHeight(400)
+
+
+class ImprovedComboBox(QComboBox):
+    """Custom QComboBox with improved dropdown behavior."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.view().setMouseTracking(True)
+        self.setItemDelegate(QStyledItemDelegate())
+
+    def showPopup(self):
+        """Override to improve popup behavior."""
+        super().showPopup()
+        # Make the popup slightly wider to prevent the scrollbar from hiding items
+        popup = self.findChild(QFrame)
+        if popup:
+            width = max(self.width(), popup.width() + 20)  # Extra width for scrollbar
+            popup.setFixedWidth(width)
+
+    def eventFilter(self, watched, event):
+        """Filter events for dropdown fixes."""
+        if event.type() == QEvent.MouseMove:
+            return False  # Don't filter mouse move events
+        return super().eventFilter(watched, event)
 
 # Create a canvas class for matplotlib
 class MatplotlibCanvas(FigureCanvasQTAgg):
@@ -73,7 +120,7 @@ class AnalyticsDialog(QDialog):
         control_layout = QHBoxLayout()
         control_layout.addWidget(QLabel("Select Question:"))
 
-        self.question_combo = QComboBox()
+        self.question_combo = BetterComboBox()
         if self.student_data and "question_data" in self.student_data:
             for q in sorted(self.student_data["question_data"].keys(), key=int):
                 q_data = self.student_data["question_data"][q]
@@ -81,6 +128,10 @@ class AnalyticsDialog(QDialog):
                 self.question_combo.addItem(title)
         self.question_combo.currentIndexChanged.connect(self.update_chart)
         control_layout.addWidget(self.question_combo)
+
+        # Fix for dropdown visibility issues
+        self.question_combo.view().setMouseTracking(True)
+        self.question_combo.view().viewport().installEventFilter(self)
 
         # Add normalization option
         self.normalize_cb = QCheckBox("Show as percentage")
@@ -107,6 +158,8 @@ class AnalyticsDialog(QDialog):
         # Add toolbar
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         question_layout.addWidget(self.toolbar)
+        for action in self.toolbar.actions():
+            action.triggered.connect(self.update_chart)
 
         # Add stats
         self.stats_label = QLabel()
@@ -284,6 +337,21 @@ class AnalyticsDialog(QDialog):
 
         # Refresh the canvas
         self.overall_canvas.draw()
+
+    def eventFilter(self, watched, event):
+        """Filter events for dropdown fixes."""
+        # Fix for dropdown items being hidden when mouse hovers over them
+        if hasattr(self, 'question_combo') and event.type() == QEvent.MouseMove and (
+                watched == self.question_combo.view().viewport() or
+                watched == self.question_combo.view()):
+            return False  # Don't filter mouse move events in combobox
+        return super().eventFilter(watched, event)
+
+    def handle_toolbar_action(self, action):
+        """Handle toolbar button clicks."""
+        # This ensures the action is properly processed
+        # Update chart after toolbar action
+        QTimer.singleShot(100, self.update_chart)
 
 
 class GradingConfigDialog(QDialog):
@@ -1319,8 +1387,10 @@ class RubricGrader(QMainWindow):
 
                 if reply == QMessageBox.Yes:
                     # Create a simple dialog to let user choose which file to recover
+                    # Create a simple dialog to let user choose which file to recover
                     dialog = QDialog(self)
                     dialog.setWindowTitle("Select Recovery File")
+                    dialog.setMinimumWidth(400)
                     dialog.setStyleSheet("""
                         QDialog {
                             background-color: white;
@@ -1337,31 +1407,33 @@ class RubricGrader(QMainWindow):
                     title.setProperty("labelType", "heading")
                     layout.addWidget(title)
 
-                    # Add combo box
+                    # Create combo box
                     combo = QComboBox()
+                    combo.setMinimumHeight(30)  # Make it taller
                     for _, student, time_str in recovery_files:
                         combo.addItem(f"{student} - {time_str}")
                     layout.addWidget(combo)
 
+                    # Add some spacing
+                    spacer = QWidget()
+                    spacer.setMinimumHeight(20)
+                    layout.addWidget(spacer)
+
                     # Add buttons
                     buttons = QHBoxLayout()
-                    ok_btn = QPushButton("Recover")
-                    ok_btn.clicked.connect(dialog.accept)
                     cancel_btn = QPushButton("Cancel")
-                    cancel_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: white;
-                            color: #3F51B5;
-                            border: 1px solid #3F51B5;
-                        }
-                        QPushButton:hover {
-                            background-color: #E8EAF6;
-                        }
-                    """)
                     cancel_btn.clicked.connect(dialog.reject)
                     buttons.addWidget(cancel_btn)
-                    buttons.addWidget(ok_btn)
 
+                    recover_btn = QPushButton("Recover")
+                    recover_btn.clicked.connect(dialog.accept)
+                    recover_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #3F51B5;
+                            color: white;
+                        }
+                    """)
+                    buttons.addWidget(recover_btn)
                     layout.addLayout(buttons)
 
                     if dialog.exec_() == QDialog.Accepted:
