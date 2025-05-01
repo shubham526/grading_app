@@ -1,9 +1,9 @@
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QWidget, QHBoxLayout, QLabel, QCheckBox, QSlider, \
     QDialogButtonBox
 from src.ui.widgets.canvas import MatplotlibCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+from PyQt5.QtCore import Qt, QTimer, QEvent
 
 from src.ui.widgets.combobox import BetterComboBox
 
