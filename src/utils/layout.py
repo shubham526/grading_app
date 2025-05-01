@@ -1,68 +1,95 @@
-def setup_rubric_ui(self):
-    """Set up the UI based on the loaded rubric."""
-    # Clear existing criteria
-    self.clear_layout(self.criteria_layout)
-    self.criterion_widgets = []
-    self.question_groups = {}
-    self.question_summary_card.setVisible(True)
+"""
+Layout utilities for the Rubric Grading Tool.
 
-    if not self.rubric_data or "criteria" not in self.rubric_data:
-        self.status_bar.set_status("Invalid rubric format.")
-        self.status_label.setText("Invalid rubric format.")
+This module provides functions for managing UI layouts, including setting up
+UI components based on loaded data and handling layout-specific operations.
+"""
+
+from PyQt5.QtWidgets import QLabel, QHBoxLayout, QPushButton, QCheckBox
+from PyQt5.QtCore import Qt
+
+from src.core.grader import extract_main_questions, extract_question_number
+from src.core.assessment import update_question_summary
+
+
+def setup_rubric_ui(window):
+    """
+    Set up the UI based on the loaded rubric.
+
+    Args:
+        window: The parent window object
+    """
+    # Clear existing criteria
+    clear_layout(window.criteria_layout)
+    window.criterion_widgets = []
+    window.question_groups = {}
+    window.question_summary_card.setVisible(True)
+
+    if not window.rubric_data or "criteria" not in window.rubric_data:
+        window.status_bar.set_status("Invalid rubric format.")
+        window.status_label.setText("Invalid rubric format.")
         return
 
     # Set assignment name if available
-    if "title" in self.rubric_data and not self.assignment_name_edit.text():
-        self.assignment_name_edit.setText(self.rubric_data["title"])
+    if "title" in window.rubric_data and not window.assignment_name_edit.text():
+        window.assignment_name_edit.setText(window.rubric_data["title"])
 
     # Extract main questions from criteria titles
-    main_questions = self.extract_main_questions()
+    main_questions = extract_main_questions(window)
 
     # Create widgets for each criterion
-    for criterion in self.rubric_data["criteria"]:
+    for criterion in window.rubric_data["criteria"]:
+        from src.ui.widgets import CriterionWidget
         criterion_widget = CriterionWidget(criterion)
         # Connect the signal to update total points when a criterion changes
-        criterion_widget.points_changed.connect(self.update_total_points)
-        self.criteria_layout.addWidget(criterion_widget)
-        self.criterion_widgets.append(criterion_widget)
+        criterion_widget.points_changed.connect(window.on_criterion_points_changed)
+        window.criteria_layout.addWidget(criterion_widget)
+        window.criterion_widgets.append(criterion_widget)
 
         # Group by main question
         title = criterion["title"]
-        main_question = self.extract_question_number(title)
+        main_question = extract_question_number(title)
 
         if main_question:
-            if main_question not in self.question_groups:
-                self.question_groups[main_question] = []
+            if main_question not in window.question_groups:
+                window.question_groups[main_question] = []
 
-            self.question_groups[main_question].append(criterion_widget)
+            window.question_groups[main_question].append(criterion_widget)
 
     # Set up question selection UI
-    self.setup_question_selection()
+    setup_question_selection(window)
 
     # Add stretch to push everything up
-    self.criteria_layout.addStretch()
+    window.criteria_layout.addStretch()
 
     # Update total points
-    self.update_total_points()
+    from src.core.assessment import update_total_points
+    update_total_points(window)
 
     # Update config info with question count
-    self.update_config_info()
+    window.update_config_info()
 
-    self.update_question_summary()
+    # Update the question summary
+    update_question_summary(window)
 
 
-def setup_question_selection(self):
-    """Set up checkboxes for selecting which questions the student attempted."""
+def setup_question_selection(window):
+    """
+    Set up checkboxes for selecting which questions the student attempted.
+
+    Args:
+        window: The parent window object
+    """
     # Clear existing checkboxes
-    self.clear_layout(self.question_selection_layout)
+    clear_layout(window.question_selection_layout)
 
-    grading_mode = self.grading_config["grading_mode"]
-    questions_to_count = self.grading_config["questions_to_count"]
+    grading_mode = window.grading_config["grading_mode"]
+    questions_to_count = window.grading_config["questions_to_count"]
 
     # If we found multiple main questions, create checkboxes for selection
-    if len(self.question_groups) > 1:
-        self.question_selection_group.setVisible(True)
-        self.question_checkboxes = {}
+    if len(window.question_groups) > 1:
+        window.question_selection_group.setVisible(True)
+        window.question_checkboxes = {}
 
         # Helper text based on grading mode
         if grading_mode == "best_scores":
@@ -72,31 +99,31 @@ def setup_question_selection(self):
 
         helper_label = QLabel(helper_text)
         helper_label.setStyleSheet("font-weight: bold; margin-bottom: 8px;")
-        self.question_selection_layout.addWidget(helper_label)
+        window.question_selection_layout.addWidget(helper_label)
 
         # Create a grid layout for checkboxes
         checkbox_layout = QHBoxLayout()
         checkbox_layout.setSpacing(16)
 
-        for q in sorted(self.question_groups.keys()):
+        for q in sorted(window.question_groups.keys()):
             checkbox = QCheckBox(f"Question {q}")
             checkbox.setChecked(True)  # Default to checked
             checkbox.setStyleSheet("""
-                 QCheckBox {
-                     font-size: 12px;
-                     padding: 4px;
-                 }
-                 QCheckBox:hover {
-                     background-color: #F5F5F5;
-                     border-radius: 4px;
-                 }
-             """)
-            checkbox.stateChanged.connect(self.update_total_points)
+                QCheckBox {
+                    font-size: 12px;
+                    padding: 4px;
+                }
+                QCheckBox:hover {
+                    background-color: #F5F5F5;
+                    border-radius: 4px;
+                }
+            """)
+            checkbox.stateChanged.connect(window.on_question_selection_changed)
             checkbox_layout.addWidget(checkbox)
-            self.question_checkboxes[q] = checkbox
+            window.question_checkboxes[q] = checkbox
 
         checkbox_layout.addStretch()
-        self.question_selection_layout.addLayout(checkbox_layout)
+        window.question_selection_layout.addLayout(checkbox_layout)
 
         # Add select all/none buttons
         buttons_layout = QHBoxLayout()
@@ -104,53 +131,68 @@ def setup_question_selection(self):
 
         select_all_btn = QPushButton("Select All")
         select_all_btn.setStyleSheet("""
-             QPushButton {
-                 background-color: white;
-                 color: #3F51B5;
-                 border: 1px solid #3F51B5;
-                 min-width: 100px;
-             }
-         """)
-        select_all_btn.clicked.connect(self.select_all_questions)
+            QPushButton {
+                background-color: white;
+                color: #3F51B5;
+                border: 1px solid #3F51B5;
+                min-width: 100px;
+            }
+        """)
+        select_all_btn.clicked.connect(lambda: select_all_questions(window))
         buttons_layout.addWidget(select_all_btn)
 
         select_none_btn = QPushButton("Select None")
         select_none_btn.setStyleSheet("""
-             QPushButton {
-                 background-color: white;
-                 color: #757575;
-                 border: 1px solid #BDBDBD;
-                 min-width: 100px;
-             }
-         """)
-        select_none_btn.clicked.connect(self.select_no_questions)
+            QPushButton {
+                background-color: white;
+                color: #757575;
+                border: 1px solid #BDBDBD;
+                min-width: 100px;
+            }
+        """)
+        select_none_btn.clicked.connect(lambda: select_no_questions(window))
         buttons_layout.addWidget(select_none_btn)
 
-        self.question_selection_layout.addLayout(buttons_layout)
+        window.question_selection_layout.addLayout(buttons_layout)
 
     else:
-        self.question_selection_group.setVisible(False)
+        window.question_selection_group.setVisible(False)
 
     # Update the question summary display
-    self.update_question_summary()
+    update_question_summary(window)
 
 
-def select_all_questions(self):
-    """Select all question checkboxes."""
-    if hasattr(self, 'question_checkboxes'):
-        for checkbox in self.question_checkboxes.values():
+def select_all_questions(window):
+    """
+    Select all question checkboxes.
+
+    Args:
+        window: The parent window object
+    """
+    if hasattr(window, 'question_checkboxes'):
+        for checkbox in window.question_checkboxes.values():
             checkbox.setChecked(True)
 
 
-def select_no_questions(self):
-    """Deselect all question checkboxes."""
-    if hasattr(self, 'question_checkboxes'):
-        for checkbox in self.question_checkboxes.values():
+def select_no_questions(window):
+    """
+    Deselect all question checkboxes.
+
+    Args:
+        window: The parent window object
+    """
+    if hasattr(window, 'question_checkboxes'):
+        for checkbox in window.question_checkboxes.values():
             checkbox.setChecked(False)
 
 
-def clear_layout(self, layout):
-    """Clear all widgets from a layout."""
+def clear_layout(layout):
+    """
+    Clear all widgets from a layout.
+
+    Args:
+        layout: The layout to clear
+    """
     while layout.count():
         item = layout.takeAt(0)
         widget = item.widget()
@@ -158,4 +200,4 @@ def clear_layout(self, layout):
         if widget:
             widget.deleteLater()
         elif item.layout():
-            self.clear_layout(item.layout())
+            clear_layout(item.layout())
