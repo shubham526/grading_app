@@ -289,9 +289,16 @@ def update_question_summary(self):
         # Use exactly the selected questions
         best_questions = selected_questions
 
+    # Sort questions by percentage for display (highest first)
+    sorted_display_questions = sorted(
+        question_scores.items(),
+        key=lambda x: x[1][2],
+        reverse=True
+    )
+
     # Add table rows for each question
-    for row, q in enumerate(sorted(question_scores.keys())):
-        awarded, possible, percentage = question_scores[q]
+    for row, (q, score_data) in enumerate(sorted_display_questions):
+        awarded, possible, percentage = score_data
 
         # Question number
         q_item = QTableWidgetItem(f"Question {q}")

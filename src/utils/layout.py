@@ -6,9 +6,6 @@ UI components based on loaded data and handling layout-specific operations.
 """
 
 from PyQt5.QtWidgets import QLabel, QHBoxLayout, QPushButton, QCheckBox
-from PyQt5.QtCore import Qt
-
-from src.core.grader import extract_main_questions, extract_question_number
 from src.core.assessment import update_question_summary
 
 
@@ -35,11 +32,14 @@ def setup_rubric_ui(window):
         window.assignment_name_edit.setText(window.rubric_data["title"])
 
     # Extract main questions from criteria titles
+    from src.core.grader import extract_main_questions
     main_questions = extract_main_questions(window)
 
     # Create widgets for each criterion
+    from src.ui.widgets import CriterionWidget
+    from src.core.utils import extract_question_number
+
     for criterion in window.rubric_data["criteria"]:
-        from src.ui.widgets import CriterionWidget
         criterion_widget = CriterionWidget(criterion)
         # Connect the signal to update total points when a criterion changes
         criterion_widget.points_changed.connect(window.on_criterion_points_changed)
@@ -70,6 +70,7 @@ def setup_rubric_ui(window):
     window.update_config_info()
 
     # Update the question summary
+    from src.core.assessment import update_question_summary
     update_question_summary(window)
 
 

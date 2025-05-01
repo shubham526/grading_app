@@ -339,8 +339,9 @@ class RubricGrader(QMainWindow):
             self.rubric_data = load_rubric_from_file(file_path)
             self.rubric_file_path = file_path
 
-            # Use the existing function from utils.layout
-            setup_question_selection(self)
+            # IMPORTANT: Set up the UI based on the loaded rubric data
+            from src.utils.layout import setup_rubric_ui
+            setup_rubric_ui(self)
 
             self.export_btn.setEnabled(True)
             self.config_btn.setEnabled(True)
