@@ -13,8 +13,6 @@ import numpy as np
 from PyQt5.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt
 
-from src.core.grader import extract_question_number
-
 
 def collect_assessments(self):
     """

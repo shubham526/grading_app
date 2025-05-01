@@ -4,7 +4,7 @@ Grader module for the Rubric Grading Tool.
 This module handles core grading functionality independent of the UI.
 """
 
-import re
+from src.core.utils import extract_question_number
 
 
 def extract_main_questions(self):
@@ -19,37 +19,6 @@ def extract_main_questions(self):
             main_questions.append(main_question)
 
     return sorted(main_questions)
-
-
-def extract_question_number(title):
-    """
-    Extract the main question number from a criterion title.
-
-    Args:
-        title (str): The criterion title to extract from
-
-    Returns:
-        str or None: The extracted question number or None if not found
-    """
-    if not isinstance(title, str) or not title.startswith("Question "):
-        return None
-
-    # Remove "Question " prefix
-    question_id = title.split(":")[0].replace("Question ", "").strip()
-
-    # Extract main number (1 from "1a", "1b", etc.)
-    if len(question_id) > 1 and question_id[1].isalpha():
-        return question_id[0]
-
-    # Handle other formats
-    for i, char in enumerate(question_id):
-        if not char.isdigit():
-            if i > 0:
-                return question_id[:i]
-            break
-
-    return question_id
-
 
 def is_valid_assessment(assessment):
     """

@@ -1,25 +1,6 @@
 # utils/pdf_generator.py
 
-def extract_question_number(title):
-    """Extract the main question number from a criterion title."""
-    if not title.startswith("Question "):
-        return None
-
-    # Remove "Question " prefix
-    question_id = title.split(":")[0].replace("Question ", "").strip()
-
-    # Extract main number (1 from "1a", "1b", etc.)
-    if len(question_id) > 1 and question_id[1].isalpha():
-        return question_id[0]
-
-    # Handle other formats
-    for i, char in enumerate(question_id):
-        if not char.isdigit():
-            if i > 0:
-                return question_id[:i]
-            break
-
-    return question_id
+from src.core.grader import extract_question_number
 
 
 def get_letter_grade(percentage):

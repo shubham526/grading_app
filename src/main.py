@@ -6,13 +6,12 @@ This module initializes and launches the Rubric Grading application.
 """
 
 import sys
-import os
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QTimer
 
-from grader import RubricGrader
-from utils.styles import apply_material_style
-from utils.splash_screen import EnhancedSplashScreen
+# Fix: import RubricGrader from the proper module
+from src.ui.main_window import RubricGrader
+from src.utils.styles import apply_material_style
+from src.utils.splash_screen import EnhancedSplashScreen
 
 
 def main():

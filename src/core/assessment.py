@@ -2,11 +2,12 @@
 Assessment module for handling assessment data and calculations.
 """
 
-from PyQt5.QtWidgets import QMessageBox, QTableWidgetItem, QTableWidget, QHeaderView, QLabel, QFont
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMessageBox, QTableWidgetItem, QTableWidget, QHeaderView, QLabel
+from PyQt5.QtGui import QFont
 from PyQt5.QtGui import QColor
 
-from .grader import extract_question_number
+from .utils import extract_question_number
 
 
 def get_assessment_data(self, validate=True):

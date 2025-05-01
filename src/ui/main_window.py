@@ -6,35 +6,29 @@ import os
 import time
 import json
 import tempfile
-from datetime import datetime
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFileDialog, QScrollArea,
-    QLineEdit, QMessageBox, QGroupBox, QCheckBox,
-    QFrame, QSplitter, QProgressDialog, QDialog
+    QLineEdit, QMessageBox, QGroupBox,
+    QFrame, QSplitter, QDialog
 )
 from PyQt5.QtCore import Qt, QTimer
 import qtawesome as qta
 
 # Import from core modules
-from src.core.assessment import get_assessment_data, update_total_points, update_question_summary
-from src.core.grader import extract_main_questions, extract_question_number, is_valid_assessment
-from src.core.rubric import load_rubric_from_file, validate_rubric
+from src.core.assessment import get_assessment_data, update_total_points
+from src.core.grader import is_valid_assessment
+from src.core.rubric import load_rubric_from_file
 
 # Import from UI modules
-from src.ui.widgets.criterion import CriterionWidget
 from src.ui.widgets.header import HeaderWidget
 from src.ui.widgets.status_bar import StatusBarWidget
 from src.ui.widgets.card import CardWidget
 
-# Import from dialogs
-from src.ui.dialogs.analytics import AnalyticsDialog
-from src.ui.dialogs.config import GradingConfigDialog
 
 # Import from utils
-from src.utils.layout import clear_layout, setup_question_selection, select_all_questions, select_no_questions
-from src.utils.pdf_generator import generate_assessment_pdf
+from src.utils.layout import setup_question_selection
 from src.utils.styles import COLORS
 from src.utils.pdf import export_to_pdf, batch_export_assessments
 
@@ -408,6 +402,7 @@ class RubricGrader(QMainWindow):
 
     def show_grading_config(self):
         """Show dialog to configure grading options."""
+        from src.ui.dialogs.config import GradingConfigDialog
         if not self.question_groups:
             QMessageBox.warning(self, "Warning", "Please load a rubric first.")
             return
@@ -436,6 +431,7 @@ class RubricGrader(QMainWindow):
 
     def show_analytics(self):
         """Show the analytics dialog with student performance data."""
+        from src.ui.dialogs.analytics import AnalyticsDialog
         # Use the existing function from analytics module
         analytics_data = collect_assessments(self)
 
