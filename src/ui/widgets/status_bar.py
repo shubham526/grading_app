@@ -3,9 +3,10 @@ from PyQt5.QtCore import Qt, QTimer
 
 
 class StatusBarWidget(QStatusBar):
-    """Enhanced status bar with auto-save indicator."""
+    """Enhanced status bar with auto-save indicator and version information."""
 
     def __init__(self, parent=None):
+        """Initialize the status bar widget."""
         super().__init__(parent)
         self.setup_ui()
 
@@ -24,7 +25,7 @@ class StatusBarWidget(QStatusBar):
 
         # Status message
         self.status_label = QLabel("Ready")
-        self.addWidget(self.status_label, 1)
+        self.addWidget(self.status_label, 1)  # Stretch factor of 1 allows it to expand
 
         # Auto-save indicator
         self.auto_save_container = QWidget()
@@ -39,8 +40,14 @@ class StatusBarWidget(QStatusBar):
 
         self.addPermanentWidget(self.auto_save_container)
 
-        # Version
+        # Add a spacer
+        spacer_label = QLabel("")
+        spacer_label.setFixedWidth(10)
+        self.addPermanentWidget(spacer_label)
+
+        # Version information (from the StatusBar class)
         self.version_label = QLabel("v1.0.0")
+        self.version_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         self.addPermanentWidget(self.version_label)
 
     def set_status(self, message):
@@ -64,3 +71,7 @@ class StatusBarWidget(QStatusBar):
             self.status_label.setText(old_message)
 
         QTimer.singleShot(duration, restore)
+
+    def set_version(self, version):
+        """Set the version display text."""
+        self.version_label.setText(version)

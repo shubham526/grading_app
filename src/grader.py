@@ -25,10 +25,10 @@ import json
 import glob
 
 
-from widgets.criterion_widget import CriterionWidget
-from widgets.header_widget import HeaderWidget
-from widgets.status_bar_widget import StatusBarWidget
-from widgets.card_widget import CardWidget
+from src.ui.widgets import CriterionWidget
+from src.ui.widgets.header import HeaderWidget
+from src.ui.widgets import StatusBarWidget
+from src.ui.widgets.card import CardWidget
 from utils.rubric_parser import parse_rubric_file
 from utils.pdf_generator import generate_assessment_pdf
 from utils.styles import COLORS

@@ -20,7 +20,7 @@ sys.modules['PyQt5.QtCore'] = MagicMock()
 
 # Now we can import our modules that use PyQt5
 from src.utils.rubric_parser import parse_rubric_file
-from src.widgets.criterion_widget import CriterionWidget
+from src.ui.widgets import CriterionWidget
 
 
 class TestCriterionWidget(unittest.TestCase):
