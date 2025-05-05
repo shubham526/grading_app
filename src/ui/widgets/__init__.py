@@ -9,10 +9,10 @@ from .header import HeaderWidget
 from .status_bar import StatusBarWidget
 from .card import CardWidget
 from .canvas import MatplotlibCanvas
-from .combobox import BetterComboBox, ImprovedComboBox
 from .action_button import FloatingActionButton
 from .grade_scale import GradeScaleWidget
 from .info_panel import RubricInfoWidget
+
 
 __all__ = [
     'CriterionWidget',
@@ -20,9 +20,7 @@ __all__ = [
     'StatusBarWidget',
     'CardWidget',
     'MatplotlibCanvas',
-    'BetterComboBox',
-    'ImprovedComboBox',
     'FloatingActionButton',
     'GradeScaleWidget',
-    'RubricInfoWidget'
+    'RubricInfoWidget',
 ]

@@ -115,38 +115,6 @@ def apply_material_style(app):
             color: white;
         }
 
-        /* Fix for QComboBox dropdown issues */
-        QComboBox {
-            border: 1px solid #BDBDBD;
-            border-radius: 4px;
-            padding: 6px;
-            background-color: white;
-            min-height: 25px;
-        }
-        QComboBox:focus {
-            border: 2px solid #3F51B5;
-        }
-        QComboBox::drop-down {
-            subcontrol-origin: padding;
-            subcontrol-position: top right;
-            width: 25px;
-            border-left: 1px solid #BDBDBD;
-        }
-        QComboBox QAbstractItemView {
-            border: 1px solid #BDBDBD;
-            selection-background-color: #3F51B5;
-            selection-color: white;
-            background-color: white;
-        }
-        QComboBox QAbstractItemView::item {
-            min-height: 30px;
-            padding: 5px;
-        }
-        QComboBox QListView::item {
-            padding-left: 10px;
-            padding-right: 10px;
-        }
-
         /* Fix for toolbar navigation buttons */
         QToolButton {
             background-color: transparent;

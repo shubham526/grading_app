@@ -1,11 +1,10 @@
 import numpy as np
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QWidget, QHBoxLayout, QLabel, QCheckBox, QSlider, \
-    QDialogButtonBox
+    QDialogButtonBox, QComboBox
 from src.ui.widgets.canvas import MatplotlibCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
-from PyQt5.QtCore import Qt, QTimer, QEvent
+from PyQt5.QtCore import Qt, QTimer
 
-from src.ui.widgets.combobox import BetterComboBox
 
 
 class AnalyticsDialog(QDialog):
@@ -36,18 +35,22 @@ class AnalyticsDialog(QDialog):
         control_layout = QHBoxLayout()
         control_layout.addWidget(QLabel("Select Question:"))
 
-        self.question_combo = BetterComboBox()
+        # Replace BetterComboBox with the custom ToolButtonDropdown
+        self.question_combo = QComboBox()
         if self.student_data and "question_data" in self.student_data:
+            questions = []
             for q in sorted(self.student_data["question_data"].keys(), key=int):
                 q_data = self.student_data["question_data"][q]
                 title = q_data.get("title", f"Question {q}")
-                self.question_combo.addItem(title)
-        self.question_combo.currentIndexChanged.connect(self.update_chart)
-        control_layout.addWidget(self.question_combo)
+                questions.append(title)
+            self.question_combo.add_items(questions)
+            # If we have items, set the first one as selected
+            if questions:
+                self.question_combo.item_selected(self.question_combo.list_widget.item(0))
 
-        # Fix for dropdown visibility issues
-        self.question_combo.view().setMouseTracking(True)
-        self.question_combo.view().viewport().installEventFilter(self)
+        # Change from currentIndexChanged to selection_changed
+        self.question_combo.selection_changed.connect(self.update_chart)
+        control_layout.addWidget(self.question_combo)
 
         # Add normalization option
         self.normalize_cb = QCheckBox("Show as percentage")
@@ -131,7 +134,7 @@ class AnalyticsDialog(QDialog):
         self.canvas.axes.clear()
 
         # Get selected question
-        q_idx = self.question_combo.currentIndex()
+        q_idx = self.question_combo.current_index
         if q_idx < 0:
             return
 
@@ -253,15 +256,6 @@ class AnalyticsDialog(QDialog):
 
         # Refresh the canvas
         self.overall_canvas.draw()
-
-    def eventFilter(self, watched, event):
-        """Filter events for dropdown fixes."""
-        # Fix for dropdown items being hidden when mouse hovers over them
-        if hasattr(self, 'question_combo') and event.type() == QEvent.MouseMove and (
-                watched == self.question_combo.view().viewport() or
-                watched == self.question_combo.view()):
-            return False  # Don't filter mouse move events in combobox
-        return super().eventFilter(watched, event)
 
     def handle_toolbar_action(self, action):
         """Handle toolbar button clicks."""

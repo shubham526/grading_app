@@ -187,9 +187,9 @@ class CriterionWidget(QFrame):
                 checkbox_layout.addWidget(level_checkbox)
 
                 # Show points on the right
-                points_label = QLabel(f"{level.get('points')} pts")
-                points_label.setStyleSheet("color: #757575;")
-                checkbox_layout.addWidget(points_label)
+                # points_label = QLabel(f"{level.get('points')} pts")
+                # points_label.setStyleSheet("color: #757575;")
+                # checkbox_layout.addWidget(points_label)
 
                 level_layout.addLayout(checkbox_layout)
 
