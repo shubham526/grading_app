@@ -1,6 +1,8 @@
 # utils/pdf_generator.py
 
 from src.core.grader import extract_question_number
+import markdown
+from markdown.extensions.extra import ExtraExtension
 
 
 def get_letter_grade(percentage):
@@ -194,6 +196,13 @@ def generate_assessment_pdf(file_path, assessment_data):
 
                     score = f"{criterion['points_awarded']} / {criterion['points_possible']}"
                     comments = criterion.get('comments', "")
+                    # Convert markdown to HTML for PDF
+                    if comments:
+                        # This won't handle LaTeX math perfectly but will preserve formatting
+                        html_comments = markdown.markdown(comments, extensions=[ExtraExtension()])
+                        # For PDF, replace LaTeX math delimiters with basic text
+                        html_comments = html_comments.replace('$', '')
+                        comments = html_comments
 
                     # Wrap text in Paragraph objects for proper text wrapping
                     criteria_data.append([

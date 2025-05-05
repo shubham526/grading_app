@@ -7,6 +7,7 @@ This module defines the UI component that represents a single criterion in the r
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
                            QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
+from src.ui.widgets.math_editor import MarkdownMathEditor
 
 
 class CriterionWidget(QFrame):
@@ -206,11 +207,18 @@ class CriterionWidget(QFrame):
             layout.addWidget(levels_group)
 
         # Comments area with improved styling
-        layout.addWidget(QLabel("Comments:"))
-        self.comments_edit = QTextEdit()
-        self.comments_edit.setPlaceholderText("Add your feedback here...")
-        self.comments_edit.setMinimumHeight(80)  # Set minimum height instead
-        # Set size policy to allow vertical expansion
+        # layout.addWidget(QLabel("Comments:"))
+        # self.comments_edit = QTextEdit()
+        # self.comments_edit.setPlaceholderText("Add your feedback here...")
+        # self.comments_edit.setMinimumHeight(80)  # Set minimum height instead
+        # # Set size policy to allow vertical expansion
+        # size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # self.comments_edit.setSizePolicy(size_policy)
+        # layout.addWidget(self.comments_edit)
+        comment_label = QLabel("Comments (supports Markdown and LaTeX math with $...$ or $$...$$):")
+        layout.addWidget(comment_label)
+        self.comments_edit = MarkdownMathEditor()
+        self.comments_edit.setMinimumHeight(150)  # Make it a bit taller to accommodate the preview
         size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.comments_edit.setSizePolicy(size_policy)
         layout.addWidget(self.comments_edit)
@@ -250,7 +258,7 @@ class CriterionWidget(QFrame):
             "points_awarded": self.points_spinbox.value(),
             "points_possible": self.criterion_data.get("points", 0),
             "selected_level": selected_level,
-            "comments": self.comments_edit.toPlainText()
+            "comments": self.comments_edit.get_text()
         }
 
     def set_data(self, criterion_data):
@@ -264,7 +272,7 @@ class CriterionWidget(QFrame):
         self.points_spinbox.setValue(criterion_data.get("points_awarded", 0))
 
         # Set comments
-        self.comments_edit.setPlainText(criterion_data.get("comments", ""))
+        self.comments_edit.set_text(criterion_data.get("comments", ""))
 
         # Set level if applicable
         selected_level = criterion_data.get("selected_level", "")
