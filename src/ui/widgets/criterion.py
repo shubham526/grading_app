@@ -5,7 +5,7 @@ This module defines the UI component that represents a single criterion in the r
 """
 
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy)
+                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from src.ui.widgets.math_editor import MarkdownMathEditor
 
@@ -109,7 +109,9 @@ class CriterionWidget(QFrame):
         points_label.setStyleSheet("font-weight: bold;")
         points_layout.addWidget(points_label)
 
-        self.points_spinbox = QSpinBox()
+        self.points_spinbox = QDoubleSpinBox()
+        self.points_spinbox.setDecimals(1)  # Allow one decimal place
+        self.points_spinbox.setSingleStep(0.5)  # Set step to 0.5 points
         self.max_points = self.criterion_data.get("points", 10)
         self.points_spinbox.setRange(0, self.max_points)
         self.points_spinbox.setToolTip(f"Maximum points: {self.max_points}")
