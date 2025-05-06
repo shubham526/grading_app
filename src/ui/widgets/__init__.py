@@ -12,6 +12,7 @@ from .canvas import MatplotlibCanvas
 from .action_button import FloatingActionButton
 from .grade_scale import GradeScaleWidget
 from .info_panel import RubricInfoWidget
+from .math_editor import MarkdownMathEditor
 
 
 
@@ -24,4 +25,5 @@ __all__ = [
     'FloatingActionButton',
     'GradeScaleWidget',
     'RubricInfoWidget',
+    'MarkdownMathEditor'
 ]

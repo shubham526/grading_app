@@ -5,8 +5,9 @@ This module defines the UI component that represents a single criterion in the r
 """
 
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                           QSpinBox, QCheckBox, QGroupBox, QSizePolicy)
-from PyQt5.QtCore import pyqtSignal
+                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy)
+from PyQt5.QtCore import Qt, pyqtSignal
+from src.ui.widgets.math_editor import MarkdownMathEditor
 
 
 class CriterionWidget(QFrame):
@@ -216,6 +217,7 @@ class CriterionWidget(QFrame):
         # layout.addWidget(self.comments_edit)
         comment_label = QLabel("Comments (supports Markdown and LaTeX math with $...$ or $$...$$):")
         layout.addWidget(comment_label)
+        self.comments_edit = MarkdownMathEditor()
         self.comments_edit.setMinimumHeight(150)  # Make it a bit taller to accommodate the preview
         size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.comments_edit.setSizePolicy(size_policy)
