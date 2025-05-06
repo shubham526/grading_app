@@ -5,9 +5,8 @@ This module defines the UI component that represents a single criterion in the r
 """
 
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy)
-from PyQt5.QtCore import Qt, pyqtSignal
-from src.ui.widgets.math_editor import MarkdownMathEditor
+                           QSpinBox, QCheckBox, QGroupBox, QSizePolicy)
+from PyQt5.QtCore import pyqtSignal
 
 
 class CriterionWidget(QFrame):

@@ -35,7 +35,7 @@ class AnalyticsDialog(QDialog):
         control_layout = QHBoxLayout()
         control_layout.addWidget(QLabel("Select Question:"))
 
-        # Replace BetterComboBox with the custom ToolButtonDropdown
+        # Use standard QComboBox
         self.question_combo = QComboBox()
         if self.student_data and "question_data" in self.student_data:
             questions = []
@@ -46,10 +46,10 @@ class AnalyticsDialog(QDialog):
             self.question_combo.addItems(questions)
             # If we have items, set the first one as selected
             if questions:
-                self.question_combo.item_selected(self.question_combo.list_widget.item(0))
+                self.question_combo.setCurrentIndex(0)
 
-        # Change from currentIndexChanged to selection_changed
-        self.question_combo.selection_changed.connect(self.update_chart)
+        # Connect to currentIndexChanged signal
+        self.question_combo.currentIndexChanged.connect(self.update_chart)
         control_layout.addWidget(self.question_combo)
 
         # Add normalization option
@@ -134,7 +134,7 @@ class AnalyticsDialog(QDialog):
         self.canvas.axes.clear()
 
         # Get selected question
-        q_idx = self.question_combo.current_index
+        q_idx = self.question_combo.currentIndex()
         if q_idx < 0:
             return
 
