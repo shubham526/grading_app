@@ -216,7 +216,6 @@ class CriterionWidget(QFrame):
         # layout.addWidget(self.comments_edit)
         comment_label = QLabel("Comments (supports Markdown and LaTeX math with $...$ or $$...$$):")
         layout.addWidget(comment_label)
-        self.comments_edit = MarkdownMathEditor()
         self.comments_edit.setMinimumHeight(150)  # Make it a bit taller to accommodate the preview
         size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.comments_edit.setSizePolicy(size_policy)
