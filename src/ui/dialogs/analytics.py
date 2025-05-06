@@ -43,7 +43,7 @@ class AnalyticsDialog(QDialog):
                 q_data = self.student_data["question_data"][q]
                 title = q_data.get("title", f"Question {q}")
                 questions.append(title)
-            self.question_combo.add_items(questions)
+            self.question_combo.addItems(questions)
             # If we have items, set the first one as selected
             if questions:
                 self.question_combo.item_selected(self.question_combo.list_widget.item(0))
