@@ -6,6 +6,7 @@ import os
 import time
 import json
 import tempfile
+from src.ui.dialogs.abet_dialogs import ABETMappingDialog, ABETReportDialog
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -172,6 +173,21 @@ class RubricGrader(QMainWindow):
         self.analytics_btn.setIcon(qta.icon('fa5s.chart-bar'))
         self.analytics_btn.clicked.connect(self.show_analytics)
         actions_layout.addWidget(self.analytics_btn)
+
+        # ABET mapping button
+        self.abet_mapping_btn = QPushButton("ABET Mapping")
+        self.abet_mapping_btn.setIcon(qta.icon('fa5s.clipboard-check'))
+        self.abet_mapping_btn.clicked.connect(self.show_abet_mapping)
+        self.abet_mapping_btn.setEnabled(False)
+        self.abet_mapping_btn.setToolTip("Map rubric criteria to ABET student outcomes")
+        actions_layout.addWidget(self.abet_mapping_btn)
+
+        # ABET report button
+        self.abet_report_btn = QPushButton("ABET Report")
+        self.abet_report_btn.setIcon(qta.icon('fa5s.file-contract'))
+        self.abet_report_btn.clicked.connect(self.show_abet_report)
+        self.abet_report_btn.setToolTip("Generate ABET assessment report")
+        actions_layout.addWidget(self.abet_report_btn)
 
         # Grading configuration button
         self.config_btn = QPushButton("Grading Config")
@@ -345,6 +361,7 @@ class RubricGrader(QMainWindow):
 
             self.export_btn.setEnabled(True)
             self.config_btn.setEnabled(True)
+            self.abet_mapping_btn.setEnabled(True)
             self.status_bar.set_status(f"Loaded rubric: {os.path.basename(file_path)}")
             self.status_label.setText(f"Loaded rubric: {os.path.basename(file_path)}")
             self.analytics_btn.setEnabled(True)
@@ -714,3 +731,35 @@ class RubricGrader(QMainWindow):
                 event.accept()
         else:
             event.accept()
+
+    def show_abet_mapping(self):
+        """Show the ABET mapping dialog."""
+        if not self.rubric_data:
+            QMessageBox.warning(
+                self,
+                "No Rubric Loaded",
+                "Please load a rubric first before creating ABET mappings."
+            )
+            return
+
+        try:
+            dialog = ABETMappingDialog(self.rubric_data, self)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open ABET mapping dialog:\n{str(e)}"
+            )
+
+    def show_abet_report(self):
+        """Show the ABET report generation dialog."""
+        try:
+            dialog = ABETReportDialog(self)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open ABET report dialog:\n{str(e)}"
+            )
