@@ -10,8 +10,123 @@ from PyQt5.QtGui import QColor
 from .utils import extract_question_number
 
 
+# def get_assessment_data(self, validate=True):
+#     """Gather all the assessment data."""
+#     if not self.rubric_data or not self.criterion_widgets:
+#         return None
+#
+#     selected_questions = self.get_selected_questions()
+#     questions_to_count = self.grading_config["questions_to_count"]
+#     grading_mode = self.grading_config["grading_mode"]
+#
+#     # Validate selections based on grading mode
+#     if validate:
+#         if grading_mode == "selected" and len(selected_questions) != questions_to_count:
+#             QMessageBox.warning(
+#                 self,
+#                 "Warning",
+#                 f"Please select exactly {questions_to_count} questions to grade."
+#             )
+#             return None
+#         elif grading_mode == "best_scores" and len(selected_questions) < 1:
+#             QMessageBox.warning(
+#                 self,
+#                 "Warning",
+#                 "Please select at least one question to grade."
+#             )
+#             return None
+#
+#     # Calculate points for each selected question
+#     question_points = {}
+#     for q in selected_questions:
+#         if q in self.question_groups:
+#             q_widgets = self.question_groups[q]
+#             question_awarded = sum(widget.get_awarded_points() for widget in q_widgets)
+#             question_possible = sum(widget.get_possible_points() for widget in q_widgets)
+#             percentage = (question_awarded / question_possible * 100) if question_possible > 0 else 0
+#             question_points[q] = (question_awarded, question_possible, percentage)
+#
+#     # Determine which questions count toward the final score
+#     if grading_mode == "best_scores":
+#         # Sort questions by percentage and take the best N
+#         sorted_questions = sorted(
+#             question_points.items(),
+#             key=lambda x: x[1][2],
+#             reverse=True
+#         )
+#         count_to_use = min(questions_to_count, len(sorted_questions))
+#         best_questions = [q for q, _ in sorted_questions[:count_to_use]]
+#     else:
+#         # Use all selected questions
+#         best_questions = selected_questions
+#
+#     # Get data for all criteria, marking which ones are selected and counted
+#     criteria_data = []
+#     for widget in self.criterion_widgets:
+#         data = widget.get_data()
+#
+#         # Determine if this criterion is part of a selected question
+#         title = data["title"]
+#
+#         main_question = extract_question_number(title)
+#         is_selected = main_question in selected_questions
+#         is_counted = main_question in best_questions
+#
+#         data["selected"] = is_selected
+#         data["counted"] = is_counted
+#         criteria_data.append(data)
+#
+#     # Calculate final score
+#     counted_question_points = [points for q, points in question_points.items() if q in best_questions]
+#     earned_total = sum(points[0] for points in counted_question_points) if counted_question_points else 0
+#
+#     if self.grading_config["use_fixed_total"]:
+#         possible_total = self.grading_config["fixed_total"]
+#     else:
+#         possible_total = sum(points[1] for points in counted_question_points) if counted_question_points else 0
+#
+#     # Create question summary data for the report
+#     question_summary = []
+#     for q in sorted(self.question_groups.keys()):
+#         if q in question_points:
+#             points = question_points[q]
+#             question_summary.append({
+#                 "question": q,
+#                 "awarded": points[0],
+#                 "possible": points[1],
+#                 "percentage": points[2],
+#                 "selected": True,
+#                 "counted": q in best_questions
+#             })
+#         else:
+#             # Question not attempted/selected
+#             q_widgets = self.question_groups[q]
+#             possible = sum(widget.get_possible_points() for widget in q_widgets)
+#             question_summary.append({
+#                 "question": q,
+#                 "awarded": 0,
+#                 "possible": possible,
+#                 "percentage": 0,
+#                 "selected": False,
+#                 "counted": False
+#             })
+#
+#     return {
+#         "student_name": self.student_name_edit.text(),
+#         "assignment_name": self.assignment_name_edit.text(),
+#         "criteria": criteria_data,
+#         "selected_questions": selected_questions,
+#         "counted_questions": best_questions,
+#         "question_summary": question_summary,
+#         "grading_config": self.grading_config,
+#         "total_awarded": earned_total,
+#         "total_possible": possible_total,
+#         "percentage": (earned_total / possible_total * 100) if possible_total > 0 else 0,
+#         "rubric_path": self.rubric_file_path  # Store the path to the rubric
+#     }
+
 def get_assessment_data(self, validate=True):
-    """Gather all the assessment data."""
+    """Gather all the assessment data including descriptions and levels."""
     if not self.rubric_data or not self.criterion_widgets:
         return None
 
@@ -62,18 +177,30 @@ def get_assessment_data(self, validate=True):
 
     # Get data for all criteria, marking which ones are selected and counted
     criteria_data = []
-    for widget in self.criterion_widgets:
+    for i, widget in enumerate(self.criterion_widgets):
         data = widget.get_data()
 
         # Determine if this criterion is part of a selected question
         title = data["title"]
-
         main_question = extract_question_number(title)
         is_selected = main_question in selected_questions
         is_counted = main_question in best_questions
 
         data["selected"] = is_selected
         data["counted"] = is_counted
+
+        # Add the original criterion data from rubric (description and levels)
+        if i < len(self.rubric_data["criteria"]):
+            original_criterion = self.rubric_data["criteria"][i]
+
+            # Add description if available
+            if "description" in original_criterion:
+                data["description"] = original_criterion["description"]
+
+            # Add levels if available
+            if "levels" in original_criterion:
+                data["levels"] = original_criterion["levels"]
+
         criteria_data.append(data)
 
     # Calculate final score

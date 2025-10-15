@@ -1,4 +1,5 @@
 # utils/pdf_generator.py
+# Replace your existing src/utils/pdf_generator.py with this updated version
 
 from src.core.grader import extract_question_number
 import markdown
@@ -25,9 +26,10 @@ def generate_assessment_pdf(file_path, assessment_data):
         # Import reportlab for PDF generation
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
+        from reportlab.lib.enums import TA_LEFT
 
         # Create the PDF document
         doc = SimpleDocTemplate(file_path, pagesize=letter)
@@ -56,6 +58,28 @@ def generate_assessment_pdf(file_path, assessment_data):
             spaceAfter=6
         )
 
+        # Style for criterion descriptions
+        description_style = ParagraphStyle(
+            'Description',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#555555'),
+            leftIndent=20,
+            spaceAfter=6
+        )
+
+        # Style for achievement level descriptions
+        level_description_style = ParagraphStyle(
+            'LevelDescription',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#666666'),
+            leftIndent=30,
+            rightIndent=10,
+            spaceAfter=4,
+            alignment=TA_LEFT
+        )
+
         normal_style = styles['Normal']
 
         # Start building the document content
@@ -67,7 +91,7 @@ def generate_assessment_pdf(file_path, assessment_data):
         content.append(Paragraph(f"Student: {assessment_data['student_name']}", heading_style))
         content.append(Spacer(1, 0.2 * inch))
 
-        # Summary table at the top (similar to the example)
+        # Summary table at the top
         percentage = assessment_data['percentage']
         letter_grade = get_letter_grade(percentage)
 
@@ -176,7 +200,6 @@ def generate_assessment_pdf(file_path, assessment_data):
                     q_style = subheading_style
                 else:
                     status = " (Not counted in final score)"
-
                     # Create a muted style for non-counted questions
                     q_style = ParagraphStyle(
                         'MutedHeading',
@@ -186,54 +209,67 @@ def generate_assessment_pdf(file_path, assessment_data):
 
                 content.append(Paragraph(f"Question {q_num}{status}", q_style))
 
-                # Create criteria table for this question
-                criteria_data = [["Criterion", "Score", "Comments"]]
-
+                # Process each criterion in this question
                 for criterion in question_criteria[q_num]:
+                    # Criterion title
                     title = criterion['title'].replace(f"Question {q_num}", "").strip()
                     if title.startswith(":"):
                         title = title[1:].strip()
 
-                    score = f"{criterion['points_awarded']} / {criterion['points_possible']}"
+                    content.append(Paragraph(f"<b>{title}</b>", normal_style))
+
+                    # Add criterion description if it exists
+                    if 'description' in criterion and criterion['description']:
+                        desc_text = criterion['description']
+                        content.append(Paragraph(f"<i>{desc_text}</i>", description_style))
+
+                    # Score information
+                    score_text = f"<b>Score:</b> {criterion['points_awarded']} / {criterion['points_possible']} points"
+                    content.append(Paragraph(score_text, normal_style))
+                    content.append(Spacer(1, 0.05 * inch))
+
+                    # Achievement levels (if available)
+                    if 'levels' in criterion and criterion['levels']:
+                        content.append(Paragraph("<b>Achievement Levels:</b>", normal_style))
+
+                        for level in criterion['levels']:
+                            level_title = level.get('title', '')
+                            level_points = level.get('points', 0)
+                            level_desc = level.get('description', '')
+
+                            # Check if this level was selected
+                            selected_level = criterion.get('selected_level', '')
+                            # Extract just the level name (without points)
+                            level_name = level_title.split('(')[0].strip()
+
+                            if selected_level and level_name in selected_level:
+                                # This level was selected - make it bold/highlighted
+                                level_header = f"<b>➤ {level_title}</b> [SELECTED]"
+                            else:
+                                level_header = f"• {level_title}"
+
+                            content.append(Paragraph(level_header, normal_style))
+
+                            if level_desc:
+                                content.append(Paragraph(level_desc, level_description_style))
+
+                            content.append(Spacer(1, 0.05 * inch))
+
+                    # Comments
                     comments = criterion.get('comments', "")
-                    # Convert markdown to HTML for PDF
                     if comments:
-                        # This won't handle LaTeX math perfectly but will preserve formatting
+                        content.append(Paragraph("<b>Instructor Comments:</b>", normal_style))
+                        # Convert markdown to HTML for PDF
                         html_comments = markdown.markdown(comments, extensions=[ExtraExtension()])
-                        # For PDF, replace LaTeX math delimiters with basic text
+                        # Replace LaTeX math delimiters with basic text
                         html_comments = html_comments.replace('$', '')
-                        comments = html_comments
+                        content.append(Paragraph(html_comments, normal_style))
+                    else:
+                        content.append(Paragraph("<i>No comments provided.</i>", description_style))
 
-                    # Wrap text in Paragraph objects for proper text wrapping
-                    criteria_data.append([
-                        Paragraph(title, normal_style),
-                        Paragraph(score, normal_style),
-                        Paragraph(comments, normal_style)
-                    ])
+                    content.append(Spacer(1, 0.15 * inch))
 
-                # Create and style the table - adjust width of comments column
-                c_table = Table(criteria_data, colWidths=[2.5 * inch, 0.8 * inch, 2.7 * inch])
-                c_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-                    ('ALIGN', (1, 1), (1, -1), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Align to top for better text wrapping
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                    # Add more padding for comments
-                    ('LEFTPADDING', (2, 1), (2, -1), 6),
-                    ('RIGHTPADDING', (2, 1), (2, -1), 6),
-                    ('TOPPADDING', (0, 1), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-                ]))
-
-                content.append(c_table)
-                content.append(Spacer(1, 0.2 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
         # Build and save the PDF
         doc.build(content)
@@ -259,9 +295,18 @@ def generate_assessment_pdf(file_path, assessment_data):
 
             file.write("\nDetailed Assessment:\n")
             for criterion in assessment_data['criteria']:
-                file.write(f"{criterion['title']}: {criterion['points_awarded']} / {criterion['points_possible']}\n")
+                file.write(f"\n{criterion['title']}: {criterion['points_awarded']} / {criterion['points_possible']}\n")
+
+                if 'description' in criterion and criterion['description']:
+                    file.write(f"Description: {criterion['description']}\n")
+
+                if 'levels' in criterion and criterion['levels']:
+                    file.write("Achievement Levels:\n")
+                    for level in criterion['levels']:
+                        marker = "► " if level['title'] == criterion.get('selected_level', '') else "  "
+                        file.write(f"{marker}{level['title']}: {level.get('description', 'No description')}\n")
+
                 if 'comments' in criterion and criterion['comments']:
                     file.write(f"Comments: {criterion['comments']}\n")
-                file.write("\n")
 
         return True
