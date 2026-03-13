@@ -1,41 +1,56 @@
-"""
-Core utility functions shared across multiple modules.
-"""
-
+import re
 
 def extract_question_number(title):
     """
-    Extract the main question number from a criterion title.
+    Extract the main question number or section/question composite from a criterion title.
 
     Args:
         title (str): The criterion title to extract from
 
     Returns:
-        str or None: The extracted question number or None if not found
+        str or None: The extracted main question identifier, or None if not found
 
     Examples:
         >>> extract_question_number("Question 1: Introduction")
         '1'
         >>> extract_question_number("Question 2a: Part 1")
         '2'
-        >>> extract_question_number("Not a question")
-        None
+        >>> extract_question_number("Question A.1(a)")
+        'A.1'
+        >>> extract_question_number("Section B: Question 2(b)")
+        'B.2'
     """
-    if not isinstance(title, str) or not title.startswith("Question "):
+    if not isinstance(title, str):
         return None
 
-    # Remove "Question " prefix
-    question_id = title.split(":")[0].replace("Question ", "").strip()
+    # 1. Check for a Section identifier (e.g., "Section A")
+    section_match = re.search(r'Section\s+([A-Z0-9]+)', title, re.IGNORECASE)
 
-    # Extract main number (1 from "1a", "1b", etc.)
-    if len(question_id) > 1 and question_id[1].isalpha():
-        return question_id[0]
+    # 2. Extract the base question identifier
+    # Matches:
+    #   Question 1      -> 1
+    #   Question 2a     -> 2
+    #   Question A.1(a) -> A.1
+    #   Q 11            -> 11
+    q_match = re.search(
+        r'(?:Question|Q)\s*([A-Z]+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)',
+        title,
+        re.IGNORECASE
+    )
 
-    # Handle other formats
-    for i, char in enumerate(question_id):
-        if not char.isdigit():
-            if i > 0:
-                return question_id[:i]
-            break
+    if section_match and q_match:
+        q_id = q_match.group(1).upper()
+        s_id = section_match.group(1).upper()
 
-    return question_id
+        # Prevent duplication if question already includes section
+        if q_id.startswith(s_id + "."):
+            return q_id
+        return f"{s_id}.{q_id}"
+
+    if q_match:
+        return q_match.group(1).upper()
+
+    if section_match:
+        return section_match.group(1).upper()
+
+    return None
