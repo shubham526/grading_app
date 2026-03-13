@@ -20,45 +20,29 @@ def extract_main_questions(self):
 
     return sorted(main_questions)
 
-import re
-
 def is_valid_assessment(assessment):
     """
-    Check if the given dictionary is a valid assessment.
-
-    Args:
-        assessment (dict): The assessment data to validate
-
-    Returns:
-        bool: True if valid, False otherwise
+    Check if the given dictionary is a valid assessment/rubric.
     """
     if not isinstance(assessment, dict):
         return False
 
-    required_fields = ["student_name", "criteria"]
-    for field in required_fields:
-        if field not in assessment:
-            return False
+    if "criteria" not in assessment:
+        return False
 
     if not isinstance(assessment["criteria"], list) or len(assessment["criteria"]) == 0:
         return False
 
-    # Check if criteria contains question or section structure
     for criterion in assessment["criteria"]:
         if not isinstance(criterion, dict):
             continue
 
         title = criterion.get("title", "")
-        if not isinstance(title, str):
-            continue
-
-        # Accepts standalone words like:
-        # "Question 1", "Section A", "Q 1a"
-        # but not unrelated words like "Quality"
-        if re.search(r'\b(Question|Section|Q)\b', title, re.IGNORECASE):
+        if extract_question_number(title) is not None:
             return True
 
     return False
+
 
 
 def calculate_question_scores(question_groups):
