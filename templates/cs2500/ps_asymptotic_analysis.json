@@ -1,0 +1,120 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Asymptotic Analysis",
+  "description": "Problem set rubric template for asymptotic analysis questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_RUNTIME",
+      "title": "Runtime Analysis",
+      "description": "Student derives and justifies the asymptotic runtime of the algorithm.",
+      "points": 4,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "runtime",
+        "asymptotic-analysis"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct asymptotic runtime with clear and complete justification."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Partially correct runtime or incomplete/unclear justification."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing runtime analysis."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_RECURRENCE",
+      "title": "Recurrence Relation",
+      "description": "Student sets up and solves the recurrence relation correctly.",
+      "points": 4,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "recurrence",
+        "asymptotic-analysis"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct recurrence and correct closed-form solution."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Correct recurrence but minor error in solution, or vice versa."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect recurrence and/or solution."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_EXPLANATION",
+      "title": "Written Explanation",
+      "description": "Student explains reasoning clearly using correct asymptotic notation.",
+      "points": 2,
+      "course_outcomes": [
+        "LO7"
+      ],
+      "abet_outcomes": [
+        "SO3"
+      ],
+      "assessment_tags": [
+        "communication",
+        "notation"
+      ],
+      "levels": [
+        {
+          "title": "Clear",
+          "points": 2,
+          "description": "Explanation is clear, correct notation used throughout."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Some explanation but unclear or notation errors."
+        },
+        {
+          "title": "Missing",
+          "points": 0,
+          "description": "No written explanation."
+        }
+      ],
+      "program_outcomes": [
+        "SO3"
+      ]
+    }
+  ]
+}

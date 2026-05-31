@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.0",
+  "title": "Assignment - Information Retrieval System",
+  "description": "Template for IR system implementation and evaluation assignments.",
+  "outcome_profile": "cs5001_information_retrieval",
+  "criteria": [
+    {
+      "id": "TEMPLATE_IR_INDEXING",
+      "title": "Indexing Implementation",
+      "description": "Student implements correct text processing and inverted index construction.",
+      "points": 5,
+      "course_outcomes": ["LO1"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["indexing", "implementation"],
+      "levels": [
+        {"title": "Complete",    "points": 5, "description": "Correct inverted index with all preprocessing steps."},
+        {"title": "Substantial", "points": 3, "description": "Mostly correct with minor issues."},
+        {"title": "Partial",     "points": 1, "description": "Partial implementation."},
+        {"title": "Incorrect",   "points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_IR_RETRIEVAL",
+      "title": "Retrieval Model",
+      "description": "Student implements a retrieval model (TF-IDF, BM25, or language model) correctly.",
+      "points": 5,
+      "course_outcomes": ["LO2"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["retrieval-model", "ranking"],
+      "levels": [
+        {"title": "Complete",    "points": 5, "description": "Correct scoring formula and ranking."},
+        {"title": "Substantial", "points": 3, "description": "Mostly correct with minor formula errors."},
+        {"title": "Partial",     "points": 1, "description": "Partial implementation."},
+        {"title": "Incorrect",   "points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_IR_EVALUATION",
+      "title": "Evaluation",
+      "description": "Student evaluates the system using standard IR metrics and interprets results.",
+      "points": 4,
+      "course_outcomes": ["LO3"],
+      "program_outcomes": ["SO1"],
+      "abet_outcomes":    ["SO1"],
+      "assessment_tags": ["evaluation", "metrics"],
+      "levels": [
+        {"title": "Complete", "points": 4, "description": "Correct computation and meaningful interpretation of metrics."},
+        {"title": "Partial",  "points": 2, "description": "Correct computation but limited interpretation."},
+        {"title": "Incorrect","points": 0, "description": "Incorrect or missing evaluation."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_IR_REPORT",
+      "title": "Experimental Report",
+      "description": "Student writes a clear report describing methodology, results, and analysis.",
+      "points": 3,
+      "course_outcomes": ["LO6"],
+      "program_outcomes": ["SO3"],
+      "abet_outcomes":    ["SO3"],
+      "assessment_tags": ["report", "communication"],
+      "levels": [
+        {"title": "Clear",   "points": 3, "description": "Well-structured, reproducible, with analysis."},
+        {"title": "Partial", "points": 1, "description": "Incomplete or unclear."},
+        {"title": "Missing", "points": 0, "description": "No report."}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - NP-Completeness",
+  "description": "Problem set rubric template for NP-completeness reduction questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_NP_MEMBERSHIP",
+      "title": "NP Membership",
+      "description": "Student proves the problem is in NP by describing a polynomial-time verifier.",
+      "points": 3,
+      "course_outcomes": [
+        "LO5"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "np",
+        "membership"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 3,
+          "description": "Correct verifier clearly described."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Partially correct verifier."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid verifier."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_NP_REDUCTION",
+      "title": "Reduction Construction",
+      "description": "Student constructs a polynomial-time reduction from a known NP-complete problem.",
+      "points": 6,
+      "course_outcomes": [
+        "LO5"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "np",
+        "reduction"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 6,
+          "description": "Correct and complete reduction."
+        },
+        {
+          "title": "Substantial",
+          "points": 4,
+          "description": "Mostly correct with minor gaps."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Partial reduction attempt."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_NP_CORRECTNESS",
+      "title": "Reduction Correctness",
+      "description": "Student proves the reduction is correct (both directions of the if-and-only-if).",
+      "points": 5,
+      "course_outcomes": [
+        "LO4",
+        "LO5"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "np",
+        "correctness",
+        "proof"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 5,
+          "description": "Both directions correctly proved."
+        },
+        {
+          "title": "One-sided",
+          "points": 3,
+          "description": "Only one direction proved."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Attempt but major gaps."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid proof."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    }
+  ]
+}

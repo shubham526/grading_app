@@ -1,0 +1,128 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Greedy Algorithms",
+  "description": "Problem set rubric template for greedy algorithm questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_GREEDY_CHOICE",
+      "title": "Greedy Choice Property",
+      "description": "Student identifies and justifies the greedy choice.",
+      "points": 4,
+      "course_outcomes": [
+        "LO2"
+      ],
+      "abet_outcomes": [
+        "SO2",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "greedy",
+        "design"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct greedy choice clearly justified."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Correct choice but justification incomplete."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Wrong greedy choice or no justification."
+        }
+      ],
+      "program_outcomes": [
+        "SO2",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_CORRECTNESS_PROOF",
+      "title": "Correctness Proof",
+      "description": "Student proves algorithm correctness using exchange argument or induction.",
+      "points": 6,
+      "course_outcomes": [
+        "LO4"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "correctness",
+        "proof",
+        "greedy"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 6,
+          "description": "Formal, complete, and correct proof."
+        },
+        {
+          "title": "Substantial",
+          "points": 4,
+          "description": "Mostly correct proof with minor gaps."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Proof attempt present but major gaps."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid proof."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_RUNTIME_GREEDY",
+      "title": "Runtime Analysis",
+      "description": "Student derives the asymptotic runtime of the greedy algorithm.",
+      "points": 4,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "runtime",
+        "asymptotic-analysis"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct runtime with justification."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Minor error in runtime or justification."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing analysis."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    }
+  ]
+}

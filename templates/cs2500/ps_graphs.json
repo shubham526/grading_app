@@ -1,0 +1,69 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Graph Algorithms",
+  "description": "Problem set rubric template for graph algorithm questions (BFS, DFS, shortest paths, MSTs).",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_GRAPH_ALGO",
+      "title": "Algorithm Description",
+      "description": "Student describes a correct graph algorithm (e.g., BFS/DFS/Dijkstra/Prim/Kruskal).",
+      "points": 5,
+      "course_outcomes": ["LO2"],
+      "program_outcomes": ["SO2", "SO6"],
+      "abet_outcomes":    ["SO2", "SO6"],
+      "assessment_tags": ["graph", "algorithm", "design"],
+      "levels": [
+        {"title": "Complete",    "points": 5, "description": "Correct algorithm with clear step-by-step description."},
+        {"title": "Substantial", "points": 3, "description": "Mostly correct with minor errors or omissions."},
+        {"title": "Partial",     "points": 1, "description": "Partial algorithm with significant gaps."},
+        {"title": "Incorrect",   "points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_GRAPH_RUNTIME",
+      "title": "Runtime Analysis",
+      "description": "Student derives the time and/or space complexity using graph parameters (V, E).",
+      "points": 4,
+      "course_outcomes": ["LO1"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["runtime", "graph", "asymptotic-analysis"],
+      "levels": [
+        {"title": "Complete", "points": 4, "description": "Correct complexity in terms of V and E with justification."},
+        {"title": "Partial",  "points": 2, "description": "Partially correct or minor error in justification."},
+        {"title": "Incorrect","points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_GRAPH_CORRECTNESS",
+      "title": "Correctness Argument",
+      "description": "Student argues or proves the algorithm is correct (e.g., loop invariant, induction on BFS layers).",
+      "points": 4,
+      "course_outcomes": ["LO4"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["correctness", "proof", "graph"],
+      "levels": [
+        {"title": "Complete", "points": 4, "description": "Sound correctness argument."},
+        {"title": "Partial",  "points": 2, "description": "Partial argument with gaps."},
+        {"title": "Incorrect","points": 0, "description": "No valid argument."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_GRAPH_TRACE",
+      "title": "Algorithm Trace",
+      "description": "Student traces the algorithm execution on a given example graph.",
+      "points": 2,
+      "course_outcomes": ["LO3"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["trace", "graph"],
+      "levels": [
+        {"title": "Complete", "points": 2, "description": "Correct and complete trace showing intermediate states."},
+        {"title": "Partial",  "points": 1, "description": "Mostly correct trace with minor errors."},
+        {"title": "Incorrect","points": 0, "description": "Incorrect or missing trace."}
+      ]
+    }
+  ]
+}

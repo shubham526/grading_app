@@ -1,0 +1,68 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Sorting Algorithms",
+  "description": "Problem set rubric template for sorting algorithm questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_SORT_COMPARE",
+      "title": "Algorithm Comparison",
+      "description": "Student compares two or more sorting algorithms and evaluates trade-offs.",
+      "points": 4,
+      "course_outcomes": ["LO3"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["sorting", "compare", "tradeoff"],
+      "levels": [
+        {"title": "Complete",    "points": 4, "description": "Clear comparison with justified conclusion for the given scenario."},
+        {"title": "Partial",     "points": 2, "description": "Partial comparison missing key trade-off analysis."},
+        {"title": "Incorrect",   "points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_SORT_RECURRENCE",
+      "title": "Recurrence and Runtime",
+      "description": "Student sets up the recurrence for a divide-and-conquer sort and solves it.",
+      "points": 4,
+      "course_outcomes": ["LO1"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["recurrence", "runtime", "sorting"],
+      "levels": [
+        {"title": "Complete", "points": 4, "description": "Correct recurrence and closed-form runtime."},
+        {"title": "Partial",  "points": 2, "description": "Minor error in recurrence or solution."},
+        {"title": "Incorrect","points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_SORT_LOWER_BOUND",
+      "title": "Lower Bound Argument",
+      "description": "Student argues why comparison-based sorting requires Ω(n log n) comparisons.",
+      "points": 4,
+      "course_outcomes": ["LO4", "LO5"],
+      "program_outcomes": ["SO1", "SO6"],
+      "abet_outcomes":    ["SO1", "SO6"],
+      "assessment_tags": ["lower-bound", "sorting", "proof"],
+      "levels": [
+        {"title": "Complete",    "points": 4, "description": "Correct decision-tree argument."},
+        {"title": "Substantial", "points": 2, "description": "Correct intuition but incomplete formalization."},
+        {"title": "Incorrect",   "points": 0, "description": "No valid argument."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_SORT_EXPLAIN",
+      "title": "Written Explanation",
+      "description": "Student explains the algorithm and results clearly in writing.",
+      "points": 3,
+      "course_outcomes": ["LO7"],
+      "program_outcomes": ["SO3"],
+      "abet_outcomes":    ["SO3"],
+      "assessment_tags": ["communication", "sorting"],
+      "levels": [
+        {"title": "Clear",   "points": 3, "description": "Explanation is clear, precise, and well-organized."},
+        {"title": "Partial", "points": 1, "description": "Explanation present but unclear or incomplete."},
+        {"title": "Missing", "points": 0, "description": "No written explanation."}
+      ]
+    }
+  ]
+}
