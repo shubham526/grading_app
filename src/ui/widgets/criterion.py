@@ -256,11 +256,12 @@ class CriterionWidget(QFrame):
                 selected_level = checkbox.text().split(" (")[0]
 
         return {
+            "id": self.criterion_data.get("id", ""),
             "title": self.criterion_data.get("title", ""),
             "points_awarded": self.points_spinbox.value(),
             "points_possible": self.criterion_data.get("points", 0),
             "selected_level": selected_level,
-            "comments": self.comments_edit.get_text()
+            "comments": self.comments_edit.get_text(),
         }
 
     def set_data(self, criterion_data):

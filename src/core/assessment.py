@@ -189,17 +189,34 @@ def get_assessment_data(self, validate=True):
         data["selected"] = is_selected
         data["counted"] = is_counted
 
-        # Add the original criterion data from rubric (description and levels)
+        # Add the original criterion data from rubric (description, levels, ABET metadata)
         if i < len(self.rubric_data["criteria"]):
             original_criterion = self.rubric_data["criteria"][i]
 
-            # Add description if available
+            # Stable ID — prefer rubric's id; fall back to title-derived key
+            if "id" in original_criterion:
+                data["id"] = original_criterion["id"]
+            elif "id" not in data:
+                from src.core.utils import generate_criterion_id
+                data["id"] = generate_criterion_id(data.get("title", ""), i)
+
+            # Description
             if "description" in original_criterion:
                 data["description"] = original_criterion["description"]
 
-            # Add levels if available
+            # Achievement levels
             if "levels" in original_criterion:
                 data["levels"] = original_criterion["levels"]
+
+            # ABET / program-outcome metadata — copy from rubric so assessments
+            # are self-contained.  Write canonical name (program_outcomes) plus
+            # backward-compat alias (abet_outcomes).
+            pos = list(original_criterion.get("program_outcomes") or
+                       original_criterion.get("abet_outcomes") or [])
+            data["program_outcomes"] = pos
+            data["abet_outcomes"]    = pos          # alias
+            data["course_outcomes"]  = list(original_criterion.get("course_outcomes", []))
+            data["assessment_tags"]  = list(original_criterion.get("assessment_tags", []))
 
         criteria_data.append(data)
 
@@ -238,6 +255,19 @@ def get_assessment_data(self, validate=True):
                 "counted": False
             })
 
+    # Assessment-level ABET metadata (makes saved files self-contained for reporting)
+    rubric = self.rubric_data or {}
+    abet_meta = {
+        "assessment_schema_version": "2.0",
+        "assessment_id":   rubric.get("assessment_id", ""),
+        "course_code":     rubric.get("course_code", ""),
+        "semester":        rubric.get("semester", ""),
+        "rubric_schema_version": rubric.get("schema_version", ""),
+        "outcome_profile": rubric.get("outcome_profile", ""),
+        "profile_id":      rubric.get("profile_id",
+                                      rubric.get("outcome_profile", "")),
+    }
+
     return {
         "student_name": self.student_name_edit.text(),
         "assignment_name": self.assignment_name_edit.text(),
@@ -249,7 +279,8 @@ def get_assessment_data(self, validate=True):
         "total_awarded": earned_total,
         "total_possible": possible_total,
         "percentage": (earned_total / possible_total * 100) if possible_total > 0 else 0,
-        "rubric_path": self.rubric_file_path  # Store the path to the rubric
+        "rubric_path": self.rubric_file_path,
+        "abet_meta": abet_meta,
     }
 
 

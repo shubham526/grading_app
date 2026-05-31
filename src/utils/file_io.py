@@ -40,7 +40,11 @@ def load_rubric(window, file_path=None, show_config_on_load=True):
         return False
 
     try:
-        window.rubric_data = load_rubric_from_file(file_path)
+        result = load_rubric_from_file(file_path)
+        if isinstance(result, tuple):
+            window.rubric_data, _ = result
+        else:
+            window.rubric_data = result
         window.rubric_file_path = file_path
 
         # Update UI

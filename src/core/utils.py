@@ -1,5 +1,57 @@
 import re
 
+
+# ---------------------------------------------------------------------------
+# Criterion ID generation
+# ---------------------------------------------------------------------------
+
+def normalize_title_to_id(title: str) -> str:
+    """
+    Convert a human-readable criterion title to a stable uppercase ID token.
+
+    Examples:
+        "Question 2 - Runtime Analysis" -> "QUESTION_2_RUNTIME_ANALYSIS"
+        "Q3: Correctness Proof"         -> "Q3_CORRECTNESS_PROOF"
+    """
+    # Uppercase
+    s = title.upper()
+    # Replace any non-alphanumeric run with a single underscore
+    s = re.sub(r'[^A-Z0-9]+', '_', s)
+    # Strip leading/trailing underscores
+    s = s.strip('_')
+    return s
+
+
+def generate_criterion_id(title: str, index: int, assessment_prefix: str = "") -> str:
+    """
+    Generate a stable machine-readable criterion ID.
+
+    Preferred format:  <ASSESSMENT>_<QUESTION>_<SKILL>
+    Fallback format:   CRITERION_<index:03d>
+
+    Args:
+        title:             The criterion title string.
+        index:             Zero-based position of the criterion in the rubric
+                           (used as fallback).
+        assessment_prefix: Optional prefix such as "PS3" or "MIDTERM".
+
+    Returns:
+        A stable uppercase ID string, e.g. "PS3_Q2_RUNTIME_ANALYSIS".
+    """
+    if not title or not title.strip():
+        return f"CRITERION_{index:03d}"
+
+    normalized = normalize_title_to_id(title)
+    if not normalized:
+        return f"CRITERION_{index:03d}"
+
+    if assessment_prefix:
+        prefix = normalize_title_to_id(assessment_prefix)
+        return f"{prefix}_{normalized}"
+
+    return normalized
+
+
 def extract_question_number(title):
     """
     Extract a normalized main question identifier from rubric titles.
