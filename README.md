@@ -387,20 +387,22 @@ python -m src.tools.rubric_template list
 
 ```bash
 # Run all tests from the repo root
-python -m pytest src/tests/ -v
+python -m unittest discover -s src/tests
 
-# Individual suites
+# or with pytest if you have it installed
+python -m pytest src/tests/ -v
+```
+
+Individual suites with pytest:
+```bash
 python -m pytest src/tests/test_scoring.py    # scoring engine, validation, profiles
 python -m pytest src/tests/test_rubric.py     # rubric loading, IDs, normalisation
 python -m pytest src/tests/test_semester.py   # semester aggregation and export
 python -m pytest src/tests/test_templates.py  # template files and new profiles
 python -m pytest src/tests/test_tools.py      # CLI tools
-
-# Quiet summary
-python -m pytest src/tests/ -q
 ```
 
-All 193+ tests run headlessly — no Qt installation required.
+The automated tests run headlessly and do not require launching the GUI. Current validation: `python -m unittest discover` passes 342 tests.
 
 ---
 
@@ -453,11 +455,7 @@ outcome_percentage = sum(awarded_i × weight_i) / sum(possible_i × weight_i) ×
 
 A criterion mapped to `[SO1, SO6]` contributes its full percentage to **both** SO1 and SO6 independently — there is no splitting.
 
-Semester aggregation uses a correct weighted mean across assignments:
-
-```
-semester_mean = sum(student_pct × assignment_weight) / sum(assignment_weight)
-```
+Semester aggregation supports assignment weights using a weighted-mean formula when weights are specified. All assignments default to `weight: 1.0` if not set.
 
 ---
 
@@ -532,8 +530,8 @@ MIT License — see the LICENSE file for details.
 
 - Built with PyQt5 for cross-platform compatibility
 - PDF generation via ReportLab
-- ABET CS criteria based on 2025–2026 standards
-- Semester aggregation uses weighted-mean formula consistent with ABET evidence policy guidance
+- ABET-oriented outcome tracking based on configurable program outcome profiles
+- Semester aggregation supports assignment weights using a weighted-mean formula when weights are specified
 
 ---
 
