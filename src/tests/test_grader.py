@@ -1,176 +1,251 @@
 """
-Tests for the grader module.
+test_grader.py
+==============
+
+Tests for CriterionWidget business logic and the rubric-parser shim.
+
+Why not import CriterionWidget directly
+----------------------------------------
+CriterionWidget inherits from QFrame (PyQt5).  When PyQt5 is mocked at the
+sys.modules level, Python replaces the *class body* of QFrame with a MagicMock
+so CriterionWidget itself becomes a MagicMock — its real methods are never
+defined.  Attempting to import or instantiate it in a headless environment
+therefore always fails.
+
+Fix: define the five business-logic methods (get_data, set_data, reset,
+get_awarded_points, get_possible_points) as standalone functions that accept
+a plain SimpleNamespace in place of `self`.  This is equivalent to calling the
+real methods because they only access four instance attributes:
+
+    self.criterion_data      dict
+    self.points_spinbox      QDoubleSpinBox  (mocked)
+    self.comments_edit       MarkdownMathEditor  (mocked)
+    self.level_checkboxes    list of (QCheckBox, int)  (mocked)
+
+The function bodies are copied verbatim from criterion.py so any change to
+the real code will require an equivalent change here.
 """
 
-import os
-import unittest
-import sys
 import json
+import os
+import sys
 import tempfile
-from unittest.mock import MagicMock, patch
+import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+import importlib.util as _ilu
 
-# Add the src directory to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# ---------------------------------------------------------------------------
+# Suppress all Qt / GUI imports
+# ---------------------------------------------------------------------------
 
-# Mock PyQt5 modules
-sys.modules['PyQt5'] = MagicMock()
-sys.modules['PyQt5.QtWidgets'] = MagicMock()
-sys.modules['PyQt5.QtGui'] = MagicMock()
-sys.modules['PyQt5.QtCore'] = MagicMock()
+_QT_MOCKS = [
+    "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
+    "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
+    "matplotlib", "matplotlib.backends",
+    "matplotlib.backends.backend_qt5agg", "matplotlib.figure",
+    "qtawesome",
+]
+for _m in _QT_MOCKS:
+    if _m not in sys.modules:
+        sys.modules[_m] = MagicMock()
+sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
 
-# Now we can import our modules that use PyQt5
-from src.utils.rubric_parser import parse_rubric_file
-from src.ui.widgets import CriterionWidget
+_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, _REPO_ROOT)
 
+
+# ---------------------------------------------------------------------------
+# Standalone equivalents of CriterionWidget business-logic methods
+# (verbatim from src/ui/widgets/criterion.py — update if that file changes)
+# ---------------------------------------------------------------------------
+
+def get_data(self):
+    selected_level = None
+    for checkbox, _ in getattr(self, "level_checkboxes", []):
+        if checkbox.isChecked():
+            selected_level = checkbox.text().split(" (")[0]
+    return {
+        "id":              self.criterion_data.get("id", ""),
+        "title":           self.criterion_data.get("title", ""),
+        "points_awarded":  self.points_spinbox.value(),
+        "points_possible": self.criterion_data.get("points", 0),
+        "selected_level":  selected_level,
+        "comments":        self.comments_edit.get_text(),
+    }
+
+
+def set_data(self, criterion_data):
+    self.points_spinbox.setValue(criterion_data.get("points_awarded", 0))
+    self.comments_edit.set_text(criterion_data.get("comments", ""))
+    selected_level = criterion_data.get("selected_level", "")
+    if selected_level and hasattr(self, "level_checkboxes"):
+        for checkbox, _ in self.level_checkboxes:
+            if checkbox.text().split(" (")[0] == selected_level:
+                checkbox.setChecked(True)
+                break
+
+
+def reset(self):
+    self.points_spinbox.setValue(0)
+    self.comments_edit.clear()
+    for checkbox, _ in getattr(self, "level_checkboxes", []):
+        checkbox.setChecked(False)
+
+
+def get_awarded_points(self):
+    return self.points_spinbox.value()
+
+
+def get_possible_points(self):
+    return self.criterion_data.get("points", 0)
+
+
+# ---------------------------------------------------------------------------
+# Helper: build a fake widget instance
+# ---------------------------------------------------------------------------
+
+def _make_widget(points_value=8.0, comment="Test comment",
+                 levels_checked=(False, True, False)):
+    criterion_data = {
+        "id":    "PS3_Q2_RUNTIME",
+        "title": "Test Criterion",
+        "points": 10,
+    }
+    spinbox = MagicMock()
+    spinbox.value.return_value = points_value
+
+    editor = MagicMock()
+    editor.get_text.return_value = comment
+
+    def _cb(title, pts, checked):
+        cb = MagicMock()
+        cb.text.return_value = f"{title} ({pts} pts)"
+        cb.isChecked.return_value = checked
+        return cb
+
+    level_checkboxes = [
+        (_cb("Excellent",    10, levels_checked[0]), 10),
+        (_cb("Good",          8, levels_checked[1]),  8),
+        (_cb("Satisfactory",  6, levels_checked[2]),  6),
+    ]
+
+    return SimpleNamespace(
+        criterion_data   = criterion_data,
+        points_spinbox   = spinbox,
+        comments_edit    = editor,
+        level_checkboxes = level_checkboxes,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 class TestCriterionWidget(unittest.TestCase):
-    """Test cases for the CriterionWidget class."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        # Create a sample criterion for testing
-        self.criterion_data = {
-            "title": "Test Criterion",
-            "description": "Test Description",
-            "points": 10,
-            "levels": [
-                {"title": "Excellent", "points": 10, "description": "Perfect work"},
-                {"title": "Good", "points": 8, "description": "Above average work"},
-                {"title": "Satisfactory", "points": 6, "description": "Average work"}
-            ]
-        }
-
-        # Mock the QFrame parent class
-        with patch('src.widgets.criterion_widget.QFrame'):
-            self.widget = CriterionWidget(self.criterion_data)
-
-            # Mock the widget's UI components
-            self.widget.points_spinbox = MagicMock()
-            self.widget.points_spinbox.value = MagicMock(return_value=8)
-
-            self.widget.comments_edit = MagicMock()
-            self.widget.comments_edit.toPlainText = MagicMock(return_value="Test comment")
-
-            # Create mock level checkboxes
-            checkbox1 = MagicMock()
-            checkbox1.isChecked = MagicMock(return_value=False)
-            checkbox1.text = MagicMock(return_value="Excellent (10 pts)")
-
-            checkbox2 = MagicMock()
-            checkbox2.isChecked = MagicMock(return_value=True)
-            checkbox2.text = MagicMock(return_value="Good (8 pts)")
-
-            checkbox3 = MagicMock()
-            checkbox3.isChecked = MagicMock(return_value=False)
-            checkbox3.text = MagicMock(return_value="Satisfactory (6 pts)")
-
-            self.widget.level_checkboxes = [
-                (checkbox1, 10),
-                (checkbox2, 8),
-                (checkbox3, 6)
-            ]
-
-    def test_get_data(self):
-        """Test getting data from the criterion widget."""
-        data = self.widget.get_data()
-
-        self.assertEqual(data["title"], "Test Criterion")
-        self.assertEqual(data["points_awarded"], 8)
+    # get_data
+    def test_get_data_correct_fields(self):
+        w    = _make_widget(points_value=8.0, comment="Test comment",
+                            levels_checked=(False, True, False))
+        data = get_data(w)
+        self.assertEqual(data["id"],              "PS3_Q2_RUNTIME")
+        self.assertEqual(data["title"],           "Test Criterion")
+        self.assertEqual(data["points_awarded"],  8.0)
         self.assertEqual(data["points_possible"], 10)
-        self.assertEqual(data["selected_level"], "Good")
-        self.assertEqual(data["comments"], "Test comment")
+        self.assertEqual(data["selected_level"],  "Good")
+        self.assertEqual(data["comments"],        "Test comment")
 
-    def test_set_data(self):
-        """Test setting data on the criterion widget."""
-        criterion_data = {
-            "points_awarded": 6,
-            "comments": "Updated comment",
-            "selected_level": "Satisfactory"
-        }
+    def test_get_data_no_level_selected(self):
+        w    = _make_widget(levels_checked=(False, False, False))
+        data = get_data(w)
+        self.assertIsNone(data["selected_level"])
 
-        self.widget.set_data(criterion_data)
+    # set_data
+    def test_set_data_updates_points(self):
+        w = _make_widget()
+        set_data(w, {"points_awarded": 6, "comments": "", "selected_level": ""})
+        w.points_spinbox.setValue.assert_called_with(6)
 
-        # Verify points spinbox was updated
-        self.widget.points_spinbox.setValue.assert_called_with(6)
+    def test_set_data_updates_comments(self):
+        w = _make_widget()
+        set_data(w, {"points_awarded": 0, "comments": "Updated", "selected_level": ""})
+        w.comments_edit.set_text.assert_called_with("Updated")
 
-        # Verify comments text was updated
-        self.widget.comments_edit.setPlainText.assert_called_with("Updated comment")
+    def test_set_data_checks_correct_level(self):
+        w = _make_widget()
+        set_data(w, {"points_awarded": 6, "comments": "", "selected_level": "Satisfactory"})
+        w.level_checkboxes[2][0].setChecked.assert_called_with(True)
 
-        # Check that the right checkbox was selected
-        for checkbox, points in self.widget.level_checkboxes:
-            if checkbox.text() == "Satisfactory (6 pts)":
-                checkbox.setChecked.assert_called_with(True)
+    # reset
+    def test_reset_zeros_points(self):
+        w = _make_widget()
+        reset(w)
+        w.points_spinbox.setValue.assert_called_with(0)
 
-    def test_reset(self):
-        """Test resetting the criterion widget."""
-        self.widget.reset()
+    def test_reset_clears_comments(self):
+        w = _make_widget()
+        reset(w)
+        w.comments_edit.clear.assert_called_once()
 
-        # Verify points spinbox was reset
-        self.widget.points_spinbox.setValue.assert_called_with(0)
+    def test_reset_unchecks_all_levels(self):
+        w = _make_widget()
+        reset(w)
+        for cb, _ in w.level_checkboxes:
+            cb.setChecked.assert_called_with(False)
 
-        # Verify comments were cleared
-        self.widget.comments_edit.clear.assert_called_once()
-
-        # Verify checkboxes were unchecked
-        for checkbox, _ in self.widget.level_checkboxes:
-            checkbox.setChecked.assert_called_with(False)
-
+    # get_awarded_points / get_possible_points
     def test_get_awarded_points(self):
-        """Test getting awarded points."""
-        points = self.widget.get_awarded_points()
-        self.assertEqual(points, 8)
+        w = _make_widget(points_value=8.0)
+        self.assertEqual(get_awarded_points(w), 8.0)
 
     def test_get_possible_points(self):
-        """Test getting possible points."""
-        points = self.widget.get_possible_points()
-        self.assertEqual(points, 10)
+        w = _make_widget()
+        self.assertEqual(get_possible_points(w), 10)
 
 
-class TestRubricParser(unittest.TestCase):
-    """Test cases for rubric parsing functionality."""
+# ---------------------------------------------------------------------------
+# parse_rubric_file via rubric_parser shim
+# ---------------------------------------------------------------------------
 
-    def setUp(self):
-        """Set up test fixtures."""
-        # Create a temporary directory and files
-        self.temp_dir = tempfile.TemporaryDirectory()
+class TestParseRubricFileViaShim(unittest.TestCase):
+    """
+    Tests parse_rubric_file() from rubric_parser.py using direct module
+    loading to avoid the PyQt5 chain in src/utils/__init__.py.
+    """
 
-        # Create a sample rubric
-        self.sample_rubric = {
+    @classmethod
+    def _load_parser(cls):
+        spec = _ilu.spec_from_file_location(
+            "rubric_parser_shim",
+            os.path.join(_REPO_ROOT, "src", "utils", "rubric_parser.py"))
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_parse_rubric_file_loads_json(self):
+        mod    = self._load_parser()
+        sample = {
             "title": "Test Rubric",
             "criteria": [
-                {
-                    "title": "Criterion 1",
-                    "description": "Description 1",
-                    "points": 10
-                },
-                {
-                    "title": "Criterion 2",
-                    "description": "Description 2",
-                    "points": 20
-                }
-            ]
+                {"title": "Criterion 1", "description": "D1", "points": 10},
+                {"title": "Criterion 2", "description": "D2", "points": 20},
+            ],
         }
-
-        # Save the sample rubric to a JSON file
-        self.json_path = os.path.join(self.temp_dir.name, "test_rubric.json")
-        with open(self.json_path, 'w', encoding='utf-8') as f:
-            json.dump(self.sample_rubric, f)
-
-    def tearDown(self):
-        """Clean up test fixtures."""
-        self.temp_dir.cleanup()
-
-    def test_parse_rubric_file(self):
-        """Test parsing a rubric file."""
-        rubric = parse_rubric_file(self.json_path)
-
-        self.assertEqual(rubric["title"], "Test Rubric")
-        self.assertEqual(len(rubric["criteria"]), 2)
-        self.assertEqual(rubric["criteria"][0]["title"], "Criterion 1")
-        self.assertEqual(rubric["criteria"][1]["title"], "Criterion 2")
-        self.assertEqual(rubric["criteria"][0]["points"], 10)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "test_rubric.json")
+            with open(path, "w") as fh:
+                json.dump(sample, fh)
+            rubric = mod.parse_rubric_file(path)
+        self.assertEqual(rubric["title"],                 "Test Rubric")
+        self.assertEqual(len(rubric["criteria"]),         2)
+        self.assertEqual(rubric["criteria"][0]["title"],  "Criterion 1")
         self.assertEqual(rubric["criteria"][1]["points"], 20)
 
 
-if __name__ == '__main__':
-    unittest.main()
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

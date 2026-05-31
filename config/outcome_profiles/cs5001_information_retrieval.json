@@ -1,0 +1,49 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "cs5001_information_retrieval",
+  "course_code": "CS 5001",
+  "course_name": "Information Retrieval",
+
+  "course_outcomes": {
+    "LO1": "Explain and implement core text processing and indexing methods including tokenization, stemming, and inverted indexes.",
+    "LO2": "Apply classical and probabilistic retrieval models including TF-IDF, BM25, and language models.",
+    "LO3": "Evaluate retrieval systems using standard IR metrics such as MAP, NDCG, precision, and recall.",
+    "LO4": "Analyze and compare ranking approaches including learning-to-rank and neural retrieval models.",
+    "LO5": "Build and evaluate an end-to-end information retrieval pipeline.",
+    "LO6": "Communicate IR methodology, experimental design, and findings clearly in written reports."
+  },
+
+  "program_outcomes": {
+    "SO1": "Analyze a complex computing problem and apply principles of computing and other relevant disciplines to identify solutions.",
+    "SO2": "Design, implement, and evaluate a computing-based solution to meet a given set of computing requirements.",
+    "SO3": "Communicate effectively in a variety of professional contexts.",
+    "SO6": "Apply computer science theory and software development fundamentals to produce computing-based solutions."
+  },
+
+  "default_course_to_program": {
+    "LO1": ["SO1", "SO6"],
+    "LO2": ["SO1", "SO6"],
+    "LO3": ["SO1"],
+    "LO4": ["SO1", "SO6"],
+    "LO5": ["SO2", "SO6"],
+    "LO6": ["SO3"]
+  },
+
+  "performance_bands": {
+    "excellent":          [90.0, 100.0],
+    "adequate":           [75.0,  89.99],
+    "needs_improvement":  [40.0,  74.99],
+    "inadequate":         [ 0.0,  39.99]
+  },
+  "passing_bands": ["excellent", "adequate"],
+  "target_percentage": 75.0,
+
+  "keyword_to_course_outcome": {
+    "LO1": ["index", "inverted", "tokenization", "stemming", "preprocessing", "vocabulary", "posting", "term frequency"],
+    "LO2": ["tf-idf", "bm25", "language model", "retrieval model", "okapi", "smoothing", "query likelihood"],
+    "LO3": ["map", "ndcg", "precision", "recall", "mrr", "evaluation", "relevance judgment", "trec", "metric"],
+    "LO4": ["ranking", "learning to rank", "neural retrieval", "dense retrieval", "bi-encoder", "cross-encoder", "rerank", "bert", "dpr"],
+    "LO5": ["pipeline", "implementation", "system", "experiment", "retrieval system", "build", "deploy"],
+    "LO6": ["report", "explain", "communicate", "present", "write", "describe", "methodology"]
+  }
+}

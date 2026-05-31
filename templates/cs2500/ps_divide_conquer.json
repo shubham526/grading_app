@@ -1,0 +1,128 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Divide and Conquer",
+  "description": "Problem set rubric template for divide-and-conquer algorithm questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_DC_DESIGN",
+      "title": "Algorithm Design",
+      "description": "Student describes a correct divide-and-conquer algorithm.",
+      "points": 5,
+      "course_outcomes": [
+        "LO2"
+      ],
+      "abet_outcomes": [
+        "SO2",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "divide-and-conquer",
+        "design"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 5,
+          "description": "Correct D&C algorithm clearly described."
+        },
+        {
+          "title": "Substantial",
+          "points": 3,
+          "description": "Mostly correct with minor issues."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Partial algorithm."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO2",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_DC_RECURRENCE",
+      "title": "Recurrence and Runtime",
+      "description": "Student writes and solves the recurrence for the algorithm's runtime.",
+      "points": 4,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "recurrence",
+        "runtime",
+        "divide-and-conquer"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct recurrence and solved runtime."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Minor error in recurrence or solution."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_DC_CORRECTNESS",
+      "title": "Correctness",
+      "description": "Student proves or argues algorithm correctness.",
+      "points": 4,
+      "course_outcomes": [
+        "LO4"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "correctness",
+        "proof"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Correct inductive argument."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Partial argument."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid argument."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    }
+  ]
+}

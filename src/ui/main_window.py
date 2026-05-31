@@ -6,7 +6,9 @@ import os
 import time
 import json
 import tempfile
-from src.ui.dialogs.abet_dialogs import ABETMappingDialog, ABETReportDialog
+from src.ui.dialogs.abet_dialogs import (
+    ABETMappingDialog, ABETReportDialog, SemesterABETReportDialog,
+)
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -186,8 +188,15 @@ class RubricGrader(QMainWindow):
         self.abet_report_btn = QPushButton("ABET Report")
         self.abet_report_btn.setIcon(qta.icon('fa5s.file-contract'))
         self.abet_report_btn.clicked.connect(self.show_abet_report)
-        self.abet_report_btn.setToolTip("Generate ABET assessment report")
+        self.abet_report_btn.setToolTip("Generate ABET assessment report for one assignment")
         actions_layout.addWidget(self.abet_report_btn)
+
+        # Semester ABET report button
+        self.semester_abet_btn = QPushButton("Semester Report")
+        self.semester_abet_btn.setIcon(qta.icon('fa5s.calendar-alt'))
+        self.semester_abet_btn.clicked.connect(self.show_semester_abet_report)
+        self.semester_abet_btn.setToolTip("Generate semester-level ABET aggregation report")
+        actions_layout.addWidget(self.semester_abet_btn)
 
         # Grading configuration button
         self.config_btn = QPushButton("Grading Config")
@@ -351,9 +360,30 @@ class RubricGrader(QMainWindow):
             return
 
         try:
-            # Use the existing function from core.rubric instead of reimplementing
-            self.rubric_data = load_rubric_from_file(file_path)
+            # load_rubric_from_file now returns (rubric_data, is_dirty)
+            result = load_rubric_from_file(file_path)
+            if isinstance(result, tuple):
+                self.rubric_data, is_dirty = result
+            else:
+                # Backward compat if something returns plain dict
+                self.rubric_data, is_dirty = result, False
+
             self.rubric_file_path = file_path
+
+            # Notify user if IDs were auto-generated so they can save the updated rubric
+            if is_dirty:
+                reply = QMessageBox.question(
+                    self,
+                    "Rubric Updated",
+                    "This rubric is missing stable criterion IDs (required for ABET reporting).\n"
+                    "Would you like to save the updated rubric with IDs now?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if reply == QMessageBox.Yes:
+                    from src.core.rubric import save_rubric
+                    save_rubric(self.rubric_data, file_path)
+                    self.status_bar.show_temporary_message("Rubric saved with stable IDs")
 
             # IMPORTANT: Set up the UI based on the loaded rubric data
             from src.utils.layout import setup_rubric_ui
@@ -733,33 +763,56 @@ class RubricGrader(QMainWindow):
             event.accept()
 
     def show_abet_mapping(self):
-        """Show the ABET mapping dialog."""
+        """Show the full Phase 4 ABET mapping dialog."""
         if not self.rubric_data:
             QMessageBox.warning(
-                self,
-                "No Rubric Loaded",
+                self, "No Rubric Loaded",
                 "Please load a rubric first before creating ABET mappings."
             )
             return
-
         try:
-            dialog = ABETMappingDialog(self.rubric_data, self)
-            dialog.exec_()
+            # Load profile from rubric metadata if available
+            profile = None
+            try:
+                from src.core.outcome_profile import load_profile, load_default_profile
+                pid = (self.rubric_data.get("profile_id") or
+                       self.rubric_data.get("outcome_profile", ""))
+                profile = load_profile(pid) if pid else load_default_profile()
+            except Exception:
+                pass
+
+            dialog = ABETMappingDialog(self.rubric_data, self, profile=profile)
+            if dialog.exec_() == QDialog.Accepted:
+                # If user clicked "Save into rubric", rubric_data was mutated in-place.
+                # Prompt to save the rubric file.
+                reply = QMessageBox.question(
+                    self, "Save Rubric?",
+                    "Mappings have been embedded into the rubric.\n"
+                    "Would you like to save the rubric file now?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+                )
+                if reply == QMessageBox.Yes and self.rubric_file_path:
+                    from src.core.rubric import save_rubric
+                    save_rubric(self.rubric_data, self.rubric_file_path)
+                    self.status_bar.show_temporary_message("Rubric saved with embedded mappings")
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to open ABET mapping dialog:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Error",
+                f"Failed to open ABET mapping dialog:\n{str(e)}")
 
     def show_abet_report(self):
-        """Show the ABET report generation dialog."""
+        """Show the Phase 4 ABET assignment-level report dialog."""
         try:
-            dialog = ABETReportDialog(self)
+            dialog = ABETReportDialog(self, rubric_data=self.rubric_data or {})
             dialog.exec_()
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to open ABET report dialog:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Error",
+                f"Failed to open ABET report dialog:\n{str(e)}")
+
+    def show_semester_abet_report(self):
+        """Show the Phase 3+4 semester-level ABET aggregation dialog."""
+        try:
+            dialog = SemesterABETReportDialog(self)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error",
+                f"Failed to open Semester ABET Report dialog:\n{str(e)}")

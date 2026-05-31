@@ -1,0 +1,166 @@
+{
+  "schema_version": "2.0",
+  "title": "PS - Dynamic Programming",
+  "description": "Problem set rubric template for dynamic programming questions.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_Q_DP_SUBPROBLEM",
+      "title": "Subproblem Definition",
+      "description": "Student clearly defines the DP subproblem.",
+      "points": 3,
+      "course_outcomes": [
+        "LO2"
+      ],
+      "abet_outcomes": [
+        "SO2",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "dp",
+        "design"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 3,
+          "description": "Clear, correct subproblem definition."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Partially correct definition."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing definition."
+        }
+      ],
+      "program_outcomes": [
+        "SO2",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_DP_RECURRENCE",
+      "title": "Recurrence Relation",
+      "description": "Student writes a correct recurrence with base cases.",
+      "points": 5,
+      "course_outcomes": [
+        "LO2"
+      ],
+      "abet_outcomes": [
+        "SO2",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "dp",
+        "recurrence"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 5,
+          "description": "Correct recurrence and base cases."
+        },
+        {
+          "title": "Substantial",
+          "points": 3,
+          "description": "Mostly correct with minor errors."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Partial recurrence."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO2",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_DP_RUNTIME",
+      "title": "Runtime Analysis",
+      "description": "Student derives the runtime of the DP solution.",
+      "points": 3,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "runtime",
+        "dp"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 3,
+          "description": "Correct runtime with justification."
+        },
+        {
+          "title": "Partial",
+          "points": 1,
+          "description": "Partially correct."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_Q_DP_CORRECTNESS",
+      "title": "Correctness Argument",
+      "description": "Student argues why the recurrence is correct (induction or invariant).",
+      "points": 4,
+      "course_outcomes": [
+        "LO4"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "correctness",
+        "proof",
+        "dp"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 4,
+          "description": "Complete and correct argument."
+        },
+        {
+          "title": "Partial",
+          "points": 2,
+          "description": "Partial argument."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid argument."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    }
+  ]
+}

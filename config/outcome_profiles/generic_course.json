@@ -1,0 +1,47 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "generic_course",
+  "course_code": "DEPT XXXX",
+  "course_name": "Course Name",
+
+  "_comment": "Copy this file, set profile_id/course_code/course_name, then fill in the sections below. All keys beginning with _ are comments and are ignored by the loader.",
+
+  "course_outcomes": {
+    "LO1": "Describe the first course learning outcome here.",
+    "LO2": "Describe the second course learning outcome here.",
+    "LO3": "Describe the third course learning outcome here."
+  },
+
+  "program_outcomes": {
+    "_comment": "List the accreditation/program outcomes that apply to this course. For ABET CS, common ones are SO1–SO6. You may include only the subset relevant to this course.",
+    "SO1": "Analyze a complex computing problem and apply principles of computing and other relevant disciplines to identify solutions.",
+    "SO2": "Design, implement, and evaluate a computing-based solution to meet a given set of computing requirements.",
+    "SO3": "Communicate effectively in a variety of professional contexts.",
+    "SO6": "Apply computer science theory and software development fundamentals to produce computing-based solutions."
+  },
+
+  "default_course_to_program": {
+    "_comment": "Map each course LO to the program/ABET outcomes it provides evidence for.",
+    "LO1": ["SO1"],
+    "LO2": ["SO2"],
+    "LO3": ["SO3"]
+  },
+
+  "performance_bands": {
+    "_comment": "Each band is [low_inclusive, high_inclusive]. Scores are clamped to [0,100] before classification. Bonus points above 100 count as the top band.",
+    "excellent":          [90.0, 100.0],
+    "adequate":           [75.0,  89.99],
+    "needs_improvement":  [40.0,  74.99],
+    "inadequate":         [ 0.0,  39.99]
+  },
+
+  "passing_bands": ["excellent", "adequate"],
+  "target_percentage": 75.0,
+
+  "keyword_to_course_outcome": {
+    "_comment": "Optional: list lowercase keywords in criterion titles that suggest each LO. Used by auto-map. Leave empty if not needed.",
+    "LO1": [],
+    "LO2": [],
+    "LO3": []
+  }
+}

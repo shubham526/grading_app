@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.0",
+  "title": "Assignment - Neural Network Design",
+  "description": "Template for assignments asking students to design, implement, and analyze a neural network.",
+  "outcome_profile": "cs5480_deep_learning",
+  "criteria": [
+    {
+      "id": "TEMPLATE_NN_ARCHITECTURE",
+      "title": "Architecture Design",
+      "description": "Student designs a neural network architecture appropriate for the task.",
+      "points": 5,
+      "course_outcomes": ["LO2"],
+      "program_outcomes": ["SO2", "SO6"],
+      "abet_outcomes":    ["SO2", "SO6"],
+      "assessment_tags": ["architecture", "design"],
+      "levels": [
+        {"title": "Complete",    "points": 5, "description": "Architecture is well-justified, correctly sized, and appropriate for the task."},
+        {"title": "Substantial", "points": 3, "description": "Mostly correct with minor design issues."},
+        {"title": "Partial",     "points": 1, "description": "Partial or poorly justified architecture."},
+        {"title": "Incorrect",   "points": 0, "description": "Incorrect or missing."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_NN_TRAINING",
+      "title": "Training Setup",
+      "description": "Student selects and justifies optimizer, loss function, regularization, and hyperparameters.",
+      "points": 4,
+      "course_outcomes": ["LO3"],
+      "program_outcomes": ["SO2", "SO6"],
+      "abet_outcomes":    ["SO2", "SO6"],
+      "assessment_tags": ["training", "optimizer", "hyperparameter"],
+      "levels": [
+        {"title": "Complete", "points": 4, "description": "All choices justified with reasoning."},
+        {"title": "Partial",  "points": 2, "description": "Some choices made without justification."},
+        {"title": "Incorrect","points": 0, "description": "Missing or incorrect training setup."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_NN_ANALYSIS",
+      "title": "Results Analysis",
+      "description": "Student analyzes training curves, evaluates performance, and identifies failure modes.",
+      "points": 5,
+      "course_outcomes": ["LO4", "LO6"],
+      "program_outcomes": ["SO1"],
+      "abet_outcomes":    ["SO1"],
+      "assessment_tags": ["analysis", "evaluation", "debugging"],
+      "levels": [
+        {"title": "Complete",    "points": 5, "description": "Thorough analysis with diagnosis and remediation suggestions."},
+        {"title": "Substantial", "points": 3, "description": "Good analysis but incomplete diagnosis."},
+        {"title": "Partial",     "points": 1, "description": "Superficial analysis only."},
+        {"title": "Incorrect",   "points": 0, "description": "No analysis."}
+      ]
+    },
+    {
+      "id": "TEMPLATE_NN_REPORT",
+      "title": "Written Report",
+      "description": "Student communicates methodology, results, and limitations clearly.",
+      "points": 3,
+      "course_outcomes": ["LO7"],
+      "program_outcomes": ["SO3"],
+      "abet_outcomes":    ["SO3"],
+      "assessment_tags": ["communication", "report"],
+      "levels": [
+        {"title": "Clear",   "points": 3, "description": "Clear, well-structured, reproducible methodology description."},
+        {"title": "Partial", "points": 1, "description": "Incomplete or unclear report."},
+        {"title": "Missing", "points": 0, "description": "No written report."}
+      ]
+    }
+  ]
+}

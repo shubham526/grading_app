@@ -1,0 +1,174 @@
+{
+  "schema_version": "2.0",
+  "title": "Exam Template",
+  "description": "General exam rubric template for CS 2500. Clone and customise per exam.",
+  "outcome_profile": "cs2500_algorithms",
+  "criteria": [
+    {
+      "id": "TEMPLATE_EXAM_RUNTIME",
+      "title": "Question - Runtime Analysis",
+      "description": "Derive and justify the asymptotic runtime.",
+      "points": 10,
+      "course_outcomes": [
+        "LO1"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "runtime",
+        "asymptotic-analysis"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 10,
+          "description": "Correct runtime with full justification."
+        },
+        {
+          "title": "Substantial",
+          "points": 7,
+          "description": "Mostly correct with minor errors."
+        },
+        {
+          "title": "Partial",
+          "points": 4,
+          "description": "Partial analysis."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_EXAM_DESIGN",
+      "title": "Question - Algorithm Design",
+      "description": "Design an efficient algorithm for the given problem.",
+      "points": 15,
+      "course_outcomes": [
+        "LO2"
+      ],
+      "abet_outcomes": [
+        "SO2",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "design"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 15,
+          "description": "Correct and efficient algorithm."
+        },
+        {
+          "title": "Substantial",
+          "points": 10,
+          "description": "Mostly correct with minor issues."
+        },
+        {
+          "title": "Partial",
+          "points": 5,
+          "description": "Partial algorithm."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "Incorrect or missing."
+        }
+      ],
+      "program_outcomes": [
+        "SO2",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_EXAM_CORRECTNESS",
+      "title": "Question - Correctness Proof",
+      "description": "Prove the algorithm is correct.",
+      "points": 15,
+      "course_outcomes": [
+        "LO4"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "correctness",
+        "proof"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 15,
+          "description": "Complete formal proof."
+        },
+        {
+          "title": "Substantial",
+          "points": 10,
+          "description": "Mostly correct proof."
+        },
+        {
+          "title": "Partial",
+          "points": 5,
+          "description": "Proof attempt with major gaps."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid proof."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    },
+    {
+      "id": "TEMPLATE_EXAM_TRADEOFF",
+      "title": "Question - Algorithm Comparison",
+      "description": "Compare two algorithms and justify your choice.",
+      "points": 10,
+      "course_outcomes": [
+        "LO3"
+      ],
+      "abet_outcomes": [
+        "SO1",
+        "SO6"
+      ],
+      "assessment_tags": [
+        "compare",
+        "tradeoff"
+      ],
+      "levels": [
+        {
+          "title": "Complete",
+          "points": 10,
+          "description": "Clear comparison with justified conclusion."
+        },
+        {
+          "title": "Partial",
+          "points": 5,
+          "description": "Comparison present but incomplete."
+        },
+        {
+          "title": "Incorrect",
+          "points": 0,
+          "description": "No valid comparison."
+        }
+      ],
+      "program_outcomes": [
+        "SO1",
+        "SO6"
+      ]
+    }
+  ]
+}
