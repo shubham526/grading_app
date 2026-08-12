@@ -14,6 +14,10 @@ import csv
 from typing import Optional, Tuple, Dict
 
 from .utils import generate_criterion_id
+from .question_utils import (
+    group_criteria_by_question as _group_criteria_by_question,
+    infer_question_id_from_title,
+)
 
 SCHEMA_VERSION = "2.0"
 
@@ -68,11 +72,16 @@ def load_json_rubric(file_path: str) -> Tuple[dict, bool]:
     if "title" not in rubric_data:
         rubric_data["title"] = os.path.basename(file_path)
 
-    # Ensure schema_version present
+    # Ensure schema_version present.  Adding schema metadata is itself a
+    # normalization change, so include it in the dirty flag.
+    schema_dirty = "schema_version" not in rubric_data
     rubric_data.setdefault("schema_version", SCHEMA_VERSION)
 
-    # Generate IDs for any criterion that lacks one — mark dirty
-    is_dirty = _ensure_criterion_ids(rubric_data)
+    # Normalize stable criterion IDs / outcome aliases and infer canonical
+    # question IDs for older rubrics.
+    ids_dirty = _ensure_criterion_ids(rubric_data)
+    questions_dirty = _ensure_question_ids(rubric_data)
+    is_dirty = schema_dirty or ids_dirty or questions_dirty
 
     return rubric_data, is_dirty
 
@@ -95,15 +104,20 @@ def load_csv_rubric(file_path: str) -> dict:
             if len(row) < 3 or not row[0].strip():
                 continue
 
+            title = row[0].strip()
             criterion = {
-                "id": generate_criterion_id(row[0].strip(), idx),
-                "title": row[0].strip(),
+                "id": generate_criterion_id(title, idx),
+                "title": title,
                 "description": row[1].strip() if len(row) > 1 else "",
                 "points": int(row[2]) if len(row) > 2 and row[2].strip().isdigit() else 10,
                 "course_outcomes": [],
                 "abet_outcomes": [],
                 "assessment_tags": [],
             }
+
+            question_id = infer_question_id_from_title(title)
+            if question_id:
+                criterion["question_id"] = question_id
 
             if len(row) > 3:
                 levels = []
@@ -120,6 +134,7 @@ def load_csv_rubric(file_path: str) -> dict:
             rubric["criteria"].append(criterion)
 
     _ensure_criterion_ids(rubric)
+    _ensure_question_ids(rubric)
     return rubric
 
 
@@ -132,8 +147,9 @@ def save_rubric(rubric_data: dict, file_path: str) -> None:
     Save rubric to a JSON file, persisting all IDs and ABET metadata.
     Does NOT silently overwrite; caller must choose the path explicitly.
     """
-    # Ensure every criterion has an ID before saving
+    # Ensure every criterion has stable/core metadata before saving.
     _ensure_criterion_ids(rubric_data)
+    _ensure_question_ids(rubric_data)
     rubric_data["schema_version"] = SCHEMA_VERSION
 
     with open(file_path, "w", encoding="utf-8") as fh:
@@ -204,6 +220,32 @@ def _ensure_criterion_ids(rubric_data: dict) -> bool:
     return dirty
 
 
+def _ensure_question_ids(rubric_data: dict) -> bool:
+    """
+    Infer and add ``question_id`` for criteria that do not already have one.
+
+    Existing explicit question IDs are preserved exactly.  A criterion whose
+    title cannot be inferred remains loadable and is handled as UNASSIGNED by
+    the question-centric grouping utilities.
+
+    Returns True if at least one question ID was added.
+    """
+    dirty = False
+
+    for criterion in rubric_data.get("criteria", []):
+        if not isinstance(criterion, dict):
+            continue
+        if criterion.get("question_id"):
+            continue
+
+        question_id = infer_question_id_from_title(criterion.get("title", ""))
+        if question_id:
+            criterion["question_id"] = question_id
+            dirty = True
+
+    return dirty
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -260,12 +302,12 @@ def get_criterion_by_title(rubric_data: dict, title: str) -> Optional[dict]:
 
 
 def group_criteria_by_question(rubric_data: dict) -> dict:
-    """Group criteria by their main question number."""
-    from .utils import extract_question_number
+    """
+    Backward-compatible wrapper for the v2.1 canonical grouping utility.
 
-    groups: dict = {}
-    for criterion in rubric_data.get("criteria", []):
-        qn = extract_question_number(criterion.get("title", ""))
-        if qn:
-            groups.setdefault(qn, []).append(criterion)
-    return groups
+    New code should import ``src.core.question_utils.group_criteria_by_question``
+    directly.  Keeping this wrapper avoids breaking any external callers of the
+    older ``src.core.rubric`` helper.
+    """
+    return _group_criteria_by_question(rubric_data)
+

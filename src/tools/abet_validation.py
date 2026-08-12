@@ -75,6 +75,17 @@ def validate_rubric(
             issues.append(_issue(ERROR, "DUPLICATE_ID",
                                  f"Duplicate criterion ID '{cid}'.", cid))
 
+        # Missing canonical question assignment (v2.1).  This is intentionally
+        # non-blocking: the criterion remains gradeable under UNASSIGNED.
+        if not crit.get("question_id"):
+            issues.append(_issue(
+                WARNING,
+                "NO_QUESTION_ID",
+                f"Criterion '{cid or title}' has no question_id and the app "
+                f"could not infer one from the title.",
+                cid,
+            ))
+
         # No LO mapping
         if not crit.get("course_outcomes"):
             issues.append(_issue(WARNING, "NO_LO_MAPPING",

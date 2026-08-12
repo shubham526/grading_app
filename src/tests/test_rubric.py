@@ -167,7 +167,8 @@ class TestRubricLoading(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write(tmp, {
                 "schema_version": "2.0", "title": "Modern",
-                "criteria": [{"id": "C1", "title": "Q1", "points": 5,
+                "criteria": [{"id": "C1", "question_id": "Q1",
+                              "title": "Q1", "points": 5,
                               "course_outcomes": ["LO1"], "abet_outcomes": ["SO1"],
                               "assessment_tags": []}]})
             rubric, is_dirty = load_json_rubric(path)
@@ -361,7 +362,8 @@ class TestSavedAssessmentFields(unittest.TestCase):
         return {
             "schema_version": "2.0", "profile_id": "cs2500_algorithms",
             "title": "PS3",
-            "criteria": [{"id": "PS3_Q2_RUNTIME", "title": "Q2 Runtime",
+            "criteria": [{"id": "PS3_Q2_RUNTIME", "question_id": "Q2",
+                          "title": "Q2 Runtime",
                           "description": "Analyze.", "points": 10,
                           "course_outcomes": ["LO1"],
                           "program_outcomes": ["SO1", "SO6"],
@@ -373,6 +375,7 @@ class TestSavedAssessmentFields(unittest.TestCase):
         pos  = list(orig.get("program_outcomes") or orig.get("abet_outcomes") or [])
         return {
             "id":              orig["id"],
+            "question_id":     orig.get("question_id"),
             "points_awarded":  awarded,
             "points_possible": orig["points"],
             "selected": True, "counted": True,
@@ -385,6 +388,7 @@ class TestSavedAssessmentFields(unittest.TestCase):
     def test_criterion_data_has_all_abet_fields(self):
         crit = self._assemble(self._rubric(), 8)
         self.assertEqual(crit["id"],               "PS3_Q2_RUNTIME")
+        self.assertEqual(crit["question_id"],      "Q2")
         self.assertEqual(crit["course_outcomes"],   ["LO1"])
         self.assertEqual(crit["program_outcomes"],  ["SO1", "SO6"])
         self.assertEqual(crit["abet_outcomes"],     ["SO1", "SO6"])
@@ -415,11 +419,13 @@ class TestEndToEndPipeline(unittest.TestCase):
             "schema_version": "2.0", "title": "PS3 - Greedy",
             "profile_id": "cs2500_algorithms",
             "criteria": [
-                {"id": "PS3_Q1", "title": "Q1 Runtime", "points": 4,
+                {"id": "PS3_Q1", "question_id": "Q1",
+                 "title": "Q1 Runtime", "points": 4,
                  "course_outcomes": ["LO1"], "program_outcomes": ["SO1", "SO6"],
                  "abet_outcomes": ["SO1", "SO6"], "assessment_tags": ["runtime"],
                  "levels": []},
-                {"id": "PS3_Q2", "title": "Q2 Proof", "points": 6,
+                {"id": "PS3_Q2", "question_id": "Q2",
+                 "title": "Q2 Proof", "points": 6,
                  "course_outcomes": ["LO4"], "program_outcomes": ["SO1", "SO6"],
                  "abet_outcomes": ["SO1", "SO6"], "assessment_tags": ["proof"],
                  "levels": []},
@@ -519,3 +525,4 @@ class TestEndToEndPipeline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

@@ -370,20 +370,23 @@ class RubricGrader(QMainWindow):
 
             self.rubric_file_path = file_path
 
-            # Notify user if IDs were auto-generated so they can save the updated rubric
+            # Notify the user when rubric metadata was normalized in memory.
+            # v2.1 can mark a rubric dirty because of generated criterion IDs,
+            # inferred question IDs, or newly added schema metadata.
             if is_dirty:
                 reply = QMessageBox.question(
                     self,
-                    "Rubric Updated",
-                    "This rubric is missing stable criterion IDs (required for ABET reporting).\n"
-                    "Would you like to save the updated rubric with IDs now?",
+                    "Rubric Metadata Updated",
+                    "This rubric was normalized in memory (for example, missing "
+                    "stable criterion IDs and/or question IDs were added).\n"
+                    "Would you like to save the updated rubric metadata now?",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.Yes,
                 )
                 if reply == QMessageBox.Yes:
                     from src.core.rubric import save_rubric
                     save_rubric(self.rubric_data, file_path)
-                    self.status_bar.show_temporary_message("Rubric saved with stable IDs")
+                    self.status_bar.show_temporary_message("Rubric saved with normalized metadata")
 
             # IMPORTANT: Set up the UI based on the loaded rubric data
             from src.utils.layout import setup_rubric_ui
