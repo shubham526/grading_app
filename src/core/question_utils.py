@@ -167,7 +167,7 @@ def sort_question_ids(question_ids: Sequence[str]) -> List[str]:
     return sorted(list(question_ids), key=_question_sort_key)
 
 
-def _criterion_question_id(criterion: dict) -> str:
+def resolve_criterion_question_id(criterion: dict) -> str:
     """Resolve a criterion to an explicit, inferred, or UNASSIGNED question ID."""
     raw_qid = criterion.get("question_id")
 
@@ -198,7 +198,7 @@ def group_criteria_by_question(rubric_data: dict) -> Dict[str, List[dict]]:
     for criterion in rubric_data.get("criteria", []):
         if not isinstance(criterion, dict):
             continue
-        qid = _criterion_question_id(criterion)
+        qid = resolve_criterion_question_id(criterion)
         groups.setdefault(qid, []).append(criterion)
 
     return groups
@@ -257,6 +257,16 @@ class QuestionProgress:
     graded_students: int
     partially_graded_students: int
     ungraded_students: int
+
+
+@dataclass
+class OverallGradingProgress:
+    """Criterion-level progress across a grading session."""
+
+    total_criteria: int
+    graded_criteria: int
+    ungraded_criteria: int
+
 
 
 def _load_assessment_records(assessments_dir: str) -> List[Tuple[str, dict]]:
@@ -437,3 +447,42 @@ def compute_all_question_progress(
             student_ids=student_ids,
         )
     return progress
+
+def compute_overall_criteria_progress(
+    assessments_dir: str,
+    rubric_data: dict,
+    student_ids: Optional[Sequence[str]] = None,
+) -> OverallGradingProgress:
+    """
+    Compute criterion-level grading progress across all requested students.
+
+    The denominator is ``number of rubric criteria × number of students``.
+    Missing assessment files and missing saved criteria count as ungraded.
+    Explicit ``grading_status`` remains authoritative, so an intentionally
+    awarded zero is counted as graded while an untouched zero is not.
+    """
+    rubric_criteria = [
+        criterion for criterion in rubric_data.get("criteria", [])
+        if isinstance(criterion, dict)
+    ]
+
+    records = _load_assessment_records(assessments_dir)
+    assessments = _select_student_assessments(records, student_ids)
+
+    total = len(rubric_criteria) * len(assessments)
+    graded = 0
+
+    for assessment in assessments:
+        if assessment is None:
+            continue
+        for rubric_criterion in rubric_criteria:
+            saved = _find_saved_criterion(assessment, rubric_criterion)
+            if saved is not None and is_criterion_graded(saved):
+                graded += 1
+
+    return OverallGradingProgress(
+        total_criteria=total,
+        graded_criteria=graded,
+        ungraded_criteria=max(0, total - graded),
+    )
+

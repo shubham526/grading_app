@@ -3,6 +3,7 @@ Assessment module for handling assessment data and calculations.
 """
 
 from copy import deepcopy
+from datetime import datetime, timezone
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox, QTableWidgetItem, QTableWidget, QHeaderView, QLabel
@@ -189,6 +190,48 @@ def create_blank_assessment_from_rubric(
         assessment["student_id"] = student_id
 
     return assessment
+
+
+def update_grading_progress_metadata(
+    assessment: dict,
+    mode: str,
+    question_id: str = None,
+    student_id: str = None,
+    question_complete: bool = None,
+) -> dict:
+    """
+    Update optional v2.1 navigation/progress metadata on an assessment copy.
+
+    ``question_complete`` controls only the per-student ``completed_questions``
+    marker: True adds the current question, False removes it, and None leaves
+    the completion list unchanged.  The metadata never participates in scoring.
+    """
+    updated = deepcopy(assessment or {})
+    progress = deepcopy(updated.get("grading_progress") or {})
+
+    progress["mode"] = mode
+    if question_id:
+        progress["last_question"] = question_id
+    if student_id:
+        progress["last_student_id"] = student_id
+
+    completed = list(progress.get("completed_questions") or [])
+    if question_id and question_complete is True and question_id not in completed:
+        completed.append(question_id)
+    elif question_id and question_complete is False:
+        completed = [qid for qid in completed if qid != question_id]
+
+    # Preserve stable question order as encountered in the existing list while
+    # removing accidental duplicates.
+    deduped = []
+    for qid in completed:
+        if qid not in deduped:
+            deduped.append(qid)
+    progress["completed_questions"] = deduped
+    progress["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    updated["grading_progress"] = progress
+    return updated
 
 
 # def get_assessment_data(self, validate=True):

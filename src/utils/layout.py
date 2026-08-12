@@ -1,25 +1,23 @@
 """
 Layout utilities for the Rubric Grading Tool.
 
-This module provides functions for managing UI layouts, including setting up
-UI components based on loaded data and handling layout-specific operations.
+v2.1 keeps the legacy ``window.question_groups`` used by best-N/selected
+scoring and adds a separate ``window.workflow_question_groups`` keyed by
+canonical question IDs (Q1, Q1A, ..., UNASSIGNED) for manual navigation.
 """
 
 from PyQt5.QtWidgets import QLabel, QHBoxLayout, QPushButton, QCheckBox
+
 from src.core.assessment import update_question_summary
+from src.core.question_utils import resolve_criterion_question_id
 
 
 def setup_rubric_ui(window):
-    """
-    Set up the UI based on the loaded rubric.
-
-    Args:
-        window: The parent window object
-    """
-    # Clear existing criteria
+    """Set up criterion widgets and both legacy/workflow question groupings."""
     clear_layout(window.criteria_layout)
     window.criterion_widgets = []
     window.question_groups = {}
+    window.workflow_question_groups = {}
     window.question_summary_card.setVisible(True)
 
     if not window.rubric_data or "criteria" not in window.rubric_data:
@@ -27,72 +25,66 @@ def setup_rubric_ui(window):
         window.status_label.setText("Invalid rubric format.")
         return
 
-    # Set assignment name if available
     if "title" in window.rubric_data and not window.assignment_name_edit.text():
         window.assignment_name_edit.setText(window.rubric_data["title"])
 
-    # Extract main questions from criteria titles
-    from src.core.grader import extract_main_questions
-    main_questions = extract_main_questions(window)
-
-    # Create widgets for each criterion
     from src.ui.widgets import CriterionWidget
     from src.core.utils import extract_question_number
 
     for criterion in window.rubric_data["criteria"]:
         criterion_widget = CriterionWidget(criterion)
-        # Connect the signal to update total points when a criterion changes
         criterion_widget.points_changed.connect(window.on_criterion_points_changed)
+        if hasattr(criterion_widget, "content_changed") and hasattr(window, "on_criterion_content_changed"):
+            criterion_widget.content_changed.connect(window.on_criterion_content_changed)
+
         window.criteria_layout.addWidget(criterion_widget)
         window.criterion_widgets.append(criterion_widget)
 
-        # Group by main question
-        title = criterion["title"]
-        main_question = extract_question_number(title)
-
+        # Existing scoring grouping: do not change its identifier semantics.
+        main_question = extract_question_number(criterion.get("title", ""))
         if main_question:
-            if main_question not in window.question_groups:
-                window.question_groups[main_question] = []
+            window.question_groups.setdefault(main_question, []).append(criterion_widget)
 
-            window.question_groups[main_question].append(criterion_widget)
+        # New v2.1 workflow grouping: canonical question_id/UNASSIGNED.
+        workflow_qid = resolve_criterion_question_id(criterion)
+        window.workflow_question_groups.setdefault(workflow_qid, []).append(criterion_widget)
 
-    # Set up question selection UI
     setup_question_selection(window)
-
-    # Add stretch to push everything up
     window.criteria_layout.addStretch()
 
-    # Update total points
     from src.core.assessment import update_total_points
     update_total_points(window)
-
-    # Update config info with question count
     window.update_config_info()
-
-    # Update the question summary
-    from src.core.assessment import update_question_summary
     update_question_summary(window)
+
+    if hasattr(window, "refresh_workflow_questions"):
+        window.refresh_workflow_questions()
+
+
+def apply_workflow_question_filter(window, question_id):
+    """Show only widgets belonging to ``question_id`` in question-centric mode."""
+    visible = set(window.workflow_question_groups.get(question_id, []))
+    for widget in window.criterion_widgets:
+        widget.setVisible(widget in visible)
+
+
+def show_all_criteria(window):
+    """Restore the existing student-centric full-rubric view."""
+    for widget in window.criterion_widgets:
+        widget.setVisible(True)
 
 
 def setup_question_selection(window):
-    """
-    Set up checkboxes for selecting which questions the student attempted.
-
-    Args:
-        window: The parent window object
-    """
-    # Clear existing checkboxes
+    """Set up existing selected/attempted-question checkboxes."""
     clear_layout(window.question_selection_layout)
 
     grading_mode = window.grading_config["grading_mode"]
     questions_to_count = window.grading_config["questions_to_count"]
 
-    # If we found multiple main questions, create checkboxes for selection
     if len(window.question_groups) > 1:
         window.question_selection_group.setVisible(True)
         window.question_checkboxes = {}
 
-        # Helper text based on grading mode
         if grading_mode == "best_scores":
             helper_text = "Select ALL questions the student attempted:"
         else:
@@ -102,13 +94,12 @@ def setup_question_selection(window):
         helper_label.setStyleSheet("font-weight: bold; margin-bottom: 8px;")
         window.question_selection_layout.addWidget(helper_label)
 
-        # Create a grid layout for checkboxes
         checkbox_layout = QHBoxLayout()
         checkbox_layout.setSpacing(16)
 
-        for q in sorted(window.question_groups.keys()):
+        for q in sorted(window.question_groups.keys(), key=str):
             checkbox = QCheckBox(f"Question {q}")
-            checkbox.setChecked(True)  # Default to checked
+            checkbox.setChecked(True)
             checkbox.setStyleSheet("""
                 QCheckBox {
                     font-size: 12px;
@@ -126,7 +117,6 @@ def setup_question_selection(window):
         checkbox_layout.addStretch()
         window.question_selection_layout.addLayout(checkbox_layout)
 
-        # Add select all/none buttons
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
 
@@ -155,45 +145,27 @@ def setup_question_selection(window):
         buttons_layout.addWidget(select_none_btn)
 
         window.question_selection_layout.addLayout(buttons_layout)
-
     else:
         window.question_selection_group.setVisible(False)
+        window.question_checkboxes = {}
 
-    # Update the question summary display
     update_question_summary(window)
 
 
 def select_all_questions(window):
-    """
-    Select all question checkboxes.
-
-    Args:
-        window: The parent window object
-    """
     if hasattr(window, 'question_checkboxes'):
         for checkbox in window.question_checkboxes.values():
             checkbox.setChecked(True)
 
 
 def select_no_questions(window):
-    """
-    Deselect all question checkboxes.
-
-    Args:
-        window: The parent window object
-    """
     if hasattr(window, 'question_checkboxes'):
         for checkbox in window.question_checkboxes.values():
             checkbox.setChecked(False)
 
 
 def clear_layout(layout):
-    """
-    Clear all widgets from a layout.
-
-    Args:
-        layout: The layout to clear
-    """
+    """Recursively clear all widgets/layouts from a Qt layout."""
     while layout.count():
         item = layout.takeAt(0)
         widget = item.widget()

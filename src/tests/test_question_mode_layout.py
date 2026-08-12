@@ -1,0 +1,62 @@
+"""Headless tests for v2.1 criterion visibility helpers."""
+
+import os
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+
+for module in (
+    "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
+    "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
+):
+    if module not in sys.modules:
+        sys.modules[module] = MagicMock()
+sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+
+_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, _REPO_ROOT)
+
+
+class _FakeWidget:
+    def __init__(self, name):
+        self.name = name
+        self.visible = None
+
+    def setVisible(self, value):
+        self.visible = bool(value)
+
+
+class TestQuestionModeVisibility(unittest.TestCase):
+
+    def test_filter_shows_only_selected_question(self):
+        from src.utils.layout import apply_workflow_question_filter
+
+        q1a = _FakeWidget("q1a")
+        q1b = _FakeWidget("q1b")
+        q2 = _FakeWidget("q2")
+        window = SimpleNamespace(
+            criterion_widgets=[q1a, q1b, q2],
+            workflow_question_groups={"Q1": [q1a, q1b], "Q2": [q2]},
+        )
+
+        apply_workflow_question_filter(window, "Q2")
+
+        self.assertFalse(q1a.visible)
+        self.assertFalse(q1b.visible)
+        self.assertTrue(q2.visible)
+
+    def test_student_centric_restore_shows_every_criterion(self):
+        from src.utils.layout import show_all_criteria
+
+        widgets = [_FakeWidget("a"), _FakeWidget("b"), _FakeWidget("c")]
+        window = SimpleNamespace(criterion_widgets=widgets)
+
+        show_all_criteria(window)
+
+        self.assertTrue(all(widget.visible for widget in widgets))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -15,8 +15,10 @@ from src.ui.widgets.math_editor import MarkdownMathEditor
 class CriterionWidget(QFrame):
     """Widget representing a single criterion from the rubric."""
 
-    # Signal emitted when points are changed
+    # Existing scoring signal plus a broader edit signal used by the v2.1
+    # question-centric dirty-state tracker.
     points_changed = pyqtSignal()
+    content_changed = pyqtSignal()
 
     def __init__(self, criterion_data, parent=None):
         """
@@ -234,6 +236,11 @@ class CriterionWidget(QFrame):
         self.comments_edit.setMinimumHeight(150)  # Make it a bit taller to accommodate the preview
         size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.comments_edit.setSizePolicy(size_policy)
+        # MarkdownMathEditor intentionally exposes its inner QTextEdit.  Listen
+        # to text changes so comment-only edits participate in question-mode
+        # dirty tracking without treating a comment as an awarded score.
+        if hasattr(self.comments_edit, "editor"):
+            self.comments_edit.editor.textChanged.connect(self._on_comment_changed)
         layout.addWidget(self.comments_edit)
 
         self.setLayout(layout)
@@ -253,6 +260,13 @@ class CriterionWidget(QFrame):
             return
         self._mark_graded()
         self.points_changed.emit()
+        self.content_changed.emit()
+
+    def _on_comment_changed(self):
+        """Mark comment-only edits dirty without changing graded status."""
+        if self._loading_data:
+            return
+        self.content_changed.emit()
 
     def _on_points_editing_finished(self):
         """
@@ -268,6 +282,7 @@ class CriterionWidget(QFrame):
         self._mark_graded()
         if not was_graded:
             self.points_changed.emit()
+            self.content_changed.emit()
 
     def update_points_from_level(self):
         """Update the points value based on the selected achievement level."""
@@ -288,7 +303,14 @@ class CriterionWidget(QFrame):
                 if previous_value == self.points_spinbox.value():
                     self._mark_graded()
                     self.points_changed.emit()
+                    self.content_changed.emit()
                 return
+
+        # Deselecting the current achievement level changes saved state even
+        # though the numeric score remains unchanged.
+        self._mark_graded()
+        self.points_changed.emit()
+        self.content_changed.emit()
 
     def get_data(self):
         """
