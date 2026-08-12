@@ -481,5 +481,148 @@ class TestQuestionProgress(unittest.TestCase):
         self.assertEqual(all_progress["UNASSIGNED"].graded_students, 1)
 
 
+class TestRosterAndStudentDiscovery(unittest.TestCase):
+
+    def test_load_roster_csv_and_preserve_order(self):
+        from src.core.roster import load_roster_csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["student_id", "student_name"])
+                writer.writerow(["alice", "Alice Smith"])
+                writer.writerow(["bob", "Bob Chen"])
+
+            records = load_roster_csv(path)
+
+        self.assertEqual([r.student_id for r in records], ["alice", "bob"])
+        self.assertEqual([r.student_name for r in records], ["Alice Smith", "Bob Chen"])
+
+    def test_duplicate_roster_ids_are_rejected(self):
+        from src.core.roster import load_roster_csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["student_id", "student_name"])
+                writer.writerow(["alice", "Alice Smith"])
+                writer.writerow(["ALICE", "Alice Duplicate"])
+
+            with self.assertRaises(ValueError):
+                load_roster_csv(path)
+
+    def test_assessment_directory_discovers_valid_student_files_only(self):
+        from src.core.roster import load_students_from_assessment_dir
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "alice.json"), "w", encoding="utf-8") as fh:
+                json.dump({"student_name": "Alice Smith", "criteria": []}, fh)
+            with open(os.path.join(tmp, "rubric.json"), "w", encoding="utf-8") as fh:
+                json.dump({"title": "Rubric", "criteria": []}, fh)
+            with open(os.path.join(tmp, "bad.json"), "w", encoding="utf-8") as fh:
+                fh.write("not-json")
+
+            records = load_students_from_assessment_dir(tmp)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].student_id, "alice")
+        self.assertEqual(records[0].student_name, "Alice Smith")
+
+    def test_roster_merge_attaches_legacy_assessment_by_student_name(self):
+        from src.core.roster import StudentRecord, merge_student_records
+
+        roster = [StudentRecord("123", "Alice Smith"), StudentRecord("456", "Bob Chen")]
+        assessments = [StudentRecord("old_filename", "Alice Smith", "/tmp/alice.json")]
+        merged = merge_student_records(roster, assessments, "/tmp")
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0].student_id, "123")
+        self.assertEqual(merged[0].assessment_path, "/tmp/alice.json")
+        self.assertTrue(merged[1].assessment_path.endswith("456.json"))
+
+
+class TestGradingProgressMetadata(unittest.TestCase):
+
+    def test_mark_complete_preserves_other_assessment_metadata(self):
+        from src.core.assessment import update_grading_progress_metadata
+
+        original = {
+            "student_name": "Alice",
+            "abet_meta": {"profile_id": "test"},
+            "grading_progress": {"completed_questions": ["Q1"]},
+        }
+        updated = update_grading_progress_metadata(
+            original,
+            mode="question_centric",
+            question_id="Q2",
+            student_id="alice",
+            question_complete=True,
+        )
+
+        self.assertEqual(updated["student_name"], "Alice")
+        self.assertEqual(updated["abet_meta"], {"profile_id": "test"})
+        self.assertEqual(updated["grading_progress"]["completed_questions"], ["Q1", "Q2"])
+        self.assertEqual(updated["grading_progress"]["last_question"], "Q2")
+        self.assertEqual(updated["grading_progress"]["last_student_id"], "alice")
+        self.assertIn("last_updated", updated["grading_progress"])
+        self.assertEqual(original["grading_progress"]["completed_questions"], ["Q1"])
+
+    def test_incomplete_question_removes_completion_marker(self):
+        from src.core.assessment import update_grading_progress_metadata
+
+        updated = update_grading_progress_metadata(
+            {"grading_progress": {"completed_questions": ["Q1", "Q2"]}},
+            mode="question_centric",
+            question_id="Q2",
+            question_complete=False,
+        )
+        self.assertEqual(updated["grading_progress"]["completed_questions"], ["Q1"])
+
+
+class TestOverallCriteriaProgress(unittest.TestCase):
+
+    def _rubric(self):
+        return {
+            "criteria": [
+                {"id": "Q1_A", "question_id": "Q1", "title": "Q1 A", "points": 5},
+                {"id": "Q1_B", "question_id": "Q1", "title": "Q1 B", "points": 5},
+                {"id": "Q2_A", "question_id": "Q2", "title": "Q2 A", "points": 5},
+            ]
+        }
+
+    def _criterion(self, cid, graded):
+        return {
+            "id": cid,
+            "points_awarded": 0,
+            "grading_status": {"graded": graded},
+        }
+
+    def test_overall_progress_counts_criteria_and_missing_students(self):
+        from src.core.question_utils import compute_overall_criteria_progress
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "alice.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "student_name": "Alice",
+                    "criteria": [
+                        self._criterion("Q1_A", True),
+                        self._criterion("Q1_B", True),
+                        self._criterion("Q2_A", False),
+                    ],
+                }, fh)
+
+            progress = compute_overall_criteria_progress(
+                tmp,
+                self._rubric(),
+                student_ids=["Alice", "Bob"],
+            )
+
+        self.assertEqual(progress.total_criteria, 6)
+        self.assertEqual(progress.graded_criteria, 2)
+        self.assertEqual(progress.ungraded_criteria, 4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
