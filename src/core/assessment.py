@@ -2,12 +2,193 @@
 Assessment module for handling assessment data and calculations.
 """
 
+from copy import deepcopy
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox, QTableWidgetItem, QTableWidget, QHeaderView, QLabel
 from PyQt5.QtGui import QFont
 from PyQt5.QtGui import QColor
 
 from .utils import extract_question_number
+
+
+# ---------------------------------------------------------------------------
+# v2.1 partial-assessment persistence helpers
+# ---------------------------------------------------------------------------
+
+def merge_partial_criteria_update(existing_assessment: dict, updated_criteria: list) -> dict:
+    """
+    Merge a partial set of criterion updates into a full assessment.
+
+    Matching rules follow the v2.1 design:
+      1. Stable criterion ID is authoritative when the update has an ID.
+      2. Title matching is used only when the updated criterion has no ID.
+      3. Untouched criteria and all assessment-level metadata are preserved.
+      4. A criterion not already present is appended without reordering others.
+
+    The input assessment is not mutated; a deep-copied merged assessment is
+    returned.
+    """
+    merged = deepcopy(existing_assessment or {})
+    existing_criteria = merged.setdefault("criteria", [])
+
+    if not isinstance(existing_criteria, list):
+        existing_criteria = []
+        merged["criteria"] = existing_criteria
+
+    for updated in updated_criteria or []:
+        if not isinstance(updated, dict):
+            continue
+
+        updated_copy = deepcopy(updated)
+        updated_id = updated_copy.get("id")
+        match_index = None
+
+        if updated_id:
+            for idx, existing in enumerate(existing_criteria):
+                if isinstance(existing, dict) and existing.get("id") == updated_id:
+                    match_index = idx
+                    break
+        else:
+            # Legacy fallback is intentionally available only when the update
+            # has no stable ID.
+            updated_title = updated_copy.get("title", "")
+            if updated_title:
+                for idx, existing in enumerate(existing_criteria):
+                    if (isinstance(existing, dict) and
+                            existing.get("title", "") == updated_title):
+                        match_index = idx
+                        break
+
+        if match_index is None:
+            existing_criteria.append(updated_copy)
+            continue
+
+        # Preserve any existing fields not represented by the visible/partial
+        # update (ABET metadata, descriptions, etc.) while replacing fields that
+        # were actually updated.
+        existing_copy = deepcopy(existing_criteria[match_index])
+        existing_copy.update(updated_copy)
+        existing_criteria[match_index] = existing_copy
+
+    return merged
+
+
+def create_blank_assessment_from_rubric(
+    rubric_data: dict,
+    student_name: str = "",
+    assignment_name: str = "",
+    rubric_path: str = None,
+    grading_config: dict = None,
+    student_id: str = None,
+) -> dict:
+    """
+    Create a full, saveable assessment skeleton from a rubric.
+
+    This is used when question-centric grading reaches a student who does not
+    yet have an assessment file.  Every rubric criterion is represented so a
+    later partial update can be merged safely; untouched criteria are marked
+    explicitly ungraded and are not selected/counted.
+    """
+    rubric = rubric_data or {}
+    config = deepcopy(grading_config) if grading_config is not None else {
+        "grading_mode": "best_scores",
+        "questions_to_count": 5,
+        "points_per_question": 10,
+        "use_fixed_total": True,
+        "fixed_total": 50,
+    }
+
+    criteria = []
+    question_possible = {}
+
+    for original in rubric.get("criteria", []):
+        if not isinstance(original, dict):
+            continue
+
+        pos = list(original.get("program_outcomes") or
+                   original.get("abet_outcomes") or [])
+
+        criterion = {
+            "id": original.get("id", ""),
+            "title": original.get("title", ""),
+            "points_awarded": 0.0,
+            "points_possible": original.get("points", 0),
+            "selected_level": None,
+            "comments": "",
+            "selected": False,
+            "counted": False,
+            "program_outcomes": pos,
+            "abet_outcomes": pos,
+            "course_outcomes": list(original.get("course_outcomes", [])),
+            "assessment_tags": list(original.get("assessment_tags", [])),
+            "grading_status": {
+                "graded": False,
+                "graded_at": None,
+                "graded_by": None,
+            },
+        }
+
+        if original.get("question_id"):
+            criterion["question_id"] = original["question_id"]
+        if "description" in original:
+            criterion["description"] = original["description"]
+        if "levels" in original:
+            criterion["levels"] = deepcopy(original["levels"])
+
+        criteria.append(criterion)
+
+        # Keep the legacy question-summary shape because the existing scoring
+        # and reporting workflow still uses extract_question_number().
+        main_question = extract_question_number(original.get("title", ""))
+        if main_question:
+            question_possible[main_question] = (
+                question_possible.get(main_question, 0) + original.get("points", 0)
+            )
+
+    question_summary = [
+        {
+            "question": question,
+            "awarded": 0,
+            "possible": possible,
+            "percentage": 0,
+            "selected": False,
+            "counted": False,
+        }
+        for question, possible in sorted(question_possible.items(), key=lambda item: str(item[0]))
+    ]
+
+    abet_meta = {
+        "assessment_schema_version": "2.0",
+        "assessment_id": rubric.get("assessment_id", ""),
+        "course_code": rubric.get("course_code", ""),
+        "semester": rubric.get("semester", ""),
+        "rubric_schema_version": rubric.get("schema_version", ""),
+        "outcome_profile": rubric.get("outcome_profile", ""),
+        "profile_id": rubric.get("profile_id", rubric.get("outcome_profile", "")),
+    }
+
+    possible_total = config.get("fixed_total", 0) if config.get("use_fixed_total") else 0
+
+    assessment = {
+        "student_name": student_name,
+        "assignment_name": assignment_name or rubric.get("title", ""),
+        "criteria": criteria,
+        "selected_questions": [],
+        "counted_questions": [],
+        "question_summary": question_summary,
+        "grading_config": config,
+        "total_awarded": 0,
+        "total_possible": possible_total,
+        "percentage": 0,
+        "rubric_path": rubric_path,
+        "abet_meta": abet_meta,
+    }
+
+    if student_id:
+        assessment["student_id"] = student_id
+
+    return assessment
 
 
 # def get_assessment_data(self, validate=True):
@@ -199,6 +380,10 @@ def get_assessment_data(self, validate=True):
             elif "id" not in data:
                 from src.core.utils import generate_criterion_id
                 data["id"] = generate_criterion_id(data.get("title", ""), i)
+
+            # Canonical v2.1 question metadata.
+            if original_criterion.get("question_id"):
+                data["question_id"] = original_criterion["question_id"]
 
             # Description
             if "description" in original_criterion:

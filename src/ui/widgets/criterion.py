@@ -7,6 +7,8 @@ This module defines the UI component that represents a single criterion in the r
 from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
                            QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
+from datetime import datetime, timezone
+
 from src.ui.widgets.math_editor import MarkdownMathEditor
 
 
@@ -28,6 +30,14 @@ class CriterionWidget(QFrame):
         self.setFrameStyle(QFrame.Box | QFrame.Raised)
         self.setLineWidth(1)
         self.criterion_data = criterion_data
+
+        # v2.1 explicit grading state.  The spin box visually defaults to 0, so
+        # a separate flag is required to distinguish "not graded yet" from an
+        # intentional score of zero.
+        self.is_graded = False
+        self.graded_at = None
+        self.graded_by = None
+        self._loading_data = False
 
         # Apply material design style
         self.setStyleSheet("""
@@ -115,7 +125,8 @@ class CriterionWidget(QFrame):
         self.max_points = self.criterion_data.get("points", 10)
         self.points_spinbox.setRange(0, self.max_points)
         self.points_spinbox.setToolTip(f"Maximum points: {self.max_points}")
-        self.points_spinbox.valueChanged.connect(self.points_changed)
+        self.points_spinbox.valueChanged.connect(self._on_points_value_changed)
+        self.points_spinbox.editingFinished.connect(self._on_points_editing_finished)
         self.points_spinbox.setStyleSheet("""
             QSpinBox {
                 background-color: white;
@@ -227,6 +238,37 @@ class CriterionWidget(QFrame):
 
         self.setLayout(layout)
 
+    def _mark_graded(self):
+        """Mark the criterion graded and refresh its grading timestamp."""
+        if self._loading_data:
+            return
+        self.is_graded = True
+        self.graded_at = datetime.now(timezone.utc).isoformat()
+        if not self.graded_by:
+            self.graded_by = "instructor"
+
+    def _on_points_value_changed(self, _value):
+        """Handle a real score change from the spin box."""
+        if self._loading_data:
+            return
+        self._mark_graded()
+        self.points_changed.emit()
+
+    def _on_points_editing_finished(self):
+        """
+        Treat an explicitly entered unchanged value (especially 0) as graded.
+
+        QDoubleSpinBox.valueChanged is not emitted when the user confirms the
+        value already displayed.  editingFinished lets a deliberate zero be
+        distinguished from an untouched default zero.
+        """
+        if self._loading_data:
+            return
+        was_graded = self.is_graded
+        self._mark_graded()
+        if not was_graded:
+            self.points_changed.emit()
+
     def update_points_from_level(self):
         """Update the points value based on the selected achievement level."""
         sender = self.sender()
@@ -236,11 +278,16 @@ class CriterionWidget(QFrame):
             if checkbox != sender and checkbox.isChecked():
                 checkbox.setChecked(False)
 
-        # Update points if a box is checked
+        # Update points if a box is checked.  If the selected level has the
+        # same numeric value already displayed, valueChanged will not fire, so
+        # explicitly mark/emit in that one case.
         for checkbox, points in self.level_checkboxes:
             if checkbox.isChecked():
+                previous_value = self.points_spinbox.value()
                 self.points_spinbox.setValue(points)
-                self.points_changed.emit()
+                if previous_value == self.points_spinbox.value():
+                    self._mark_graded()
+                    self.points_changed.emit()
                 return
 
     def get_data(self):
@@ -255,14 +302,25 @@ class CriterionWidget(QFrame):
             if checkbox.isChecked():
                 selected_level = checkbox.text().split(" (")[0]
 
-        return {
+        data = {
             "id": self.criterion_data.get("id", ""),
             "title": self.criterion_data.get("title", ""),
             "points_awarded": self.points_spinbox.value(),
             "points_possible": self.criterion_data.get("points", 0),
             "selected_level": selected_level,
             "comments": self.comments_edit.get_text(),
+            "grading_status": {
+                "graded": bool(self.is_graded),
+                "graded_at": self.graded_at,
+                "graded_by": self.graded_by,
+            },
         }
+
+        question_id = self.criterion_data.get("question_id")
+        if question_id:
+            data["question_id"] = question_id
+
+        return data
 
     def set_data(self, criterion_data):
         """
@@ -271,28 +329,57 @@ class CriterionWidget(QFrame):
         Args:
             criterion_data (dict): Dictionary containing the criterion data
         """
-        # Set points
-        self.points_spinbox.setValue(criterion_data.get("points_awarded", 0))
+        self._loading_data = True
+        try:
+            # Set points.  Legacy/partial data may use None; the visual control
+            # still displays zero while explicit grading state remains separate.
+            points_awarded = criterion_data.get("points_awarded", 0)
+            self.points_spinbox.setValue(0 if points_awarded is None else points_awarded)
 
-        # Set comments
-        self.comments_edit.set_text(criterion_data.get("comments", ""))
+            # Set comments
+            self.comments_edit.set_text(criterion_data.get("comments", ""))
 
-        # Set level if applicable
-        selected_level = criterion_data.get("selected_level", "")
-        if selected_level and hasattr(self, 'level_checkboxes'):
-            for checkbox, _ in self.level_checkboxes:
-                if checkbox.text().split(" (")[0] == selected_level:
-                    checkbox.setChecked(True)
-                    break
+            # Reset and restore level selection if applicable.
+            for checkbox, _ in getattr(self, 'level_checkboxes', []):
+                checkbox.setChecked(False)
+
+            selected_level = criterion_data.get("selected_level", "")
+            if selected_level and hasattr(self, 'level_checkboxes'):
+                for checkbox, _ in self.level_checkboxes:
+                    if checkbox.text().split(" (")[0] == selected_level:
+                        checkbox.setChecked(True)
+                        break
+
+            # v2.1 explicit status is authoritative.  Legacy assessments fall
+            # back to the design rule: points_awarded is not None => graded.
+            status = criterion_data.get("grading_status")
+            if isinstance(status, dict) and "graded" in status:
+                self.is_graded = bool(status.get("graded"))
+                self.graded_at = status.get("graded_at")
+                self.graded_by = status.get("graded_by")
+            else:
+                self.is_graded = criterion_data.get("points_awarded") is not None
+                self.graded_at = None
+                self.graded_by = None
+        finally:
+            self._loading_data = False
 
     def reset(self):
         """Reset the widget to its initial state."""
-        self.points_spinbox.setValue(0)
-        self.comments_edit.clear()
+        self._loading_data = True
+        try:
+            self.points_spinbox.setValue(0)
+            self.comments_edit.clear()
 
-        # Clear checkboxes
-        for checkbox, _ in getattr(self, 'level_checkboxes', []):
-            checkbox.setChecked(False)
+            # Clear checkboxes
+            for checkbox, _ in getattr(self, 'level_checkboxes', []):
+                checkbox.setChecked(False)
+
+            self.is_graded = False
+            self.graded_at = None
+            self.graded_by = None
+        finally:
+            self._loading_data = False
 
     def get_awarded_points(self):
         """Get the number of points awarded for this criterion."""

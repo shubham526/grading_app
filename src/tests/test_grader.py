@@ -65,32 +65,68 @@ def get_data(self):
     for checkbox, _ in getattr(self, "level_checkboxes", []):
         if checkbox.isChecked():
             selected_level = checkbox.text().split(" (")[0]
-    return {
-        "id":              self.criterion_data.get("id", ""),
-        "title":           self.criterion_data.get("title", ""),
-        "points_awarded":  self.points_spinbox.value(),
+
+    data = {
+        "id": self.criterion_data.get("id", ""),
+        "title": self.criterion_data.get("title", ""),
+        "points_awarded": self.points_spinbox.value(),
         "points_possible": self.criterion_data.get("points", 0),
-        "selected_level":  selected_level,
-        "comments":        self.comments_edit.get_text(),
+        "selected_level": selected_level,
+        "comments": self.comments_edit.get_text(),
+        "grading_status": {
+            "graded": bool(self.is_graded),
+            "graded_at": self.graded_at,
+            "graded_by": self.graded_by,
+        },
     }
+    question_id = self.criterion_data.get("question_id")
+    if question_id:
+        data["question_id"] = question_id
+    return data
 
 
 def set_data(self, criterion_data):
-    self.points_spinbox.setValue(criterion_data.get("points_awarded", 0))
-    self.comments_edit.set_text(criterion_data.get("comments", ""))
-    selected_level = criterion_data.get("selected_level", "")
-    if selected_level and hasattr(self, "level_checkboxes"):
-        for checkbox, _ in self.level_checkboxes:
-            if checkbox.text().split(" (")[0] == selected_level:
-                checkbox.setChecked(True)
-                break
+    self._loading_data = True
+    try:
+        points_awarded = criterion_data.get("points_awarded", 0)
+        self.points_spinbox.setValue(0 if points_awarded is None else points_awarded)
+        self.comments_edit.set_text(criterion_data.get("comments", ""))
+
+        for checkbox, _ in getattr(self, "level_checkboxes", []):
+            checkbox.setChecked(False)
+
+        selected_level = criterion_data.get("selected_level", "")
+        if selected_level and hasattr(self, "level_checkboxes"):
+            for checkbox, _ in self.level_checkboxes:
+                if checkbox.text().split(" (")[0] == selected_level:
+                    checkbox.setChecked(True)
+                    break
+
+        status = criterion_data.get("grading_status")
+        if isinstance(status, dict) and "graded" in status:
+            self.is_graded = bool(status.get("graded"))
+            self.graded_at = status.get("graded_at")
+            self.graded_by = status.get("graded_by")
+        else:
+            self.is_graded = criterion_data.get("points_awarded") is not None
+            self.graded_at = None
+            self.graded_by = None
+    finally:
+        self._loading_data = False
 
 
 def reset(self):
-    self.points_spinbox.setValue(0)
-    self.comments_edit.clear()
-    for checkbox, _ in getattr(self, "level_checkboxes", []):
-        checkbox.setChecked(False)
+    self._loading_data = True
+    try:
+        self.points_spinbox.setValue(0)
+        self.comments_edit.clear()
+        for checkbox, _ in getattr(self, "level_checkboxes", []):
+            checkbox.setChecked(False)
+        self.is_graded = False
+        self.graded_at = None
+        self.graded_by = None
+    finally:
+        self._loading_data = False
 
 
 def get_awarded_points(self):
@@ -106,9 +142,10 @@ def get_possible_points(self):
 # ---------------------------------------------------------------------------
 
 def _make_widget(points_value=8.0, comment="Test comment",
-                 levels_checked=(False, True, False)):
+                 levels_checked=(False, True, False), is_graded=True):
     criterion_data = {
-        "id":    "PS3_Q2_RUNTIME",
+        "id": "PS3_Q2_RUNTIME",
+        "question_id": "Q2",
         "title": "Test Criterion",
         "points": 10,
     }
@@ -135,6 +172,10 @@ def _make_widget(points_value=8.0, comment="Test comment",
         points_spinbox   = spinbox,
         comments_edit    = editor,
         level_checkboxes = level_checkboxes,
+        is_graded        = is_graded,
+        graded_at        = "2026-08-12T12:00:00+00:00" if is_graded else None,
+        graded_by        = "instructor" if is_graded else None,
+        _loading_data    = False,
     )
 
 
@@ -155,6 +196,8 @@ class TestCriterionWidget(unittest.TestCase):
         self.assertEqual(data["points_possible"], 10)
         self.assertEqual(data["selected_level"],  "Good")
         self.assertEqual(data["comments"],        "Test comment")
+        self.assertEqual(data["question_id"],     "Q2")
+        self.assertTrue(data["grading_status"]["graded"])
 
     def test_get_data_no_level_selected(self):
         w    = _make_widget(levels_checked=(False, False, False))
@@ -177,6 +220,21 @@ class TestCriterionWidget(unittest.TestCase):
         set_data(w, {"points_awarded": 6, "comments": "", "selected_level": "Satisfactory"})
         w.level_checkboxes[2][0].setChecked.assert_called_with(True)
 
+    def test_set_data_explicit_ungraded_zero_stays_ungraded(self):
+        w = _make_widget()
+        set_data(w, {
+            "points_awarded": 0,
+            "comments": "",
+            "selected_level": None,
+            "grading_status": {"graded": False, "graded_at": None, "graded_by": None},
+        })
+        self.assertFalse(w.is_graded)
+
+    def test_set_data_legacy_zero_is_considered_graded(self):
+        w = _make_widget(is_graded=False)
+        set_data(w, {"points_awarded": 0, "comments": "", "selected_level": None})
+        self.assertTrue(w.is_graded)
+
     # reset
     def test_reset_zeros_points(self):
         w = _make_widget()
@@ -193,6 +251,13 @@ class TestCriterionWidget(unittest.TestCase):
         reset(w)
         for cb, _ in w.level_checkboxes:
             cb.setChecked.assert_called_with(False)
+
+    def test_reset_clears_grading_status(self):
+        w = _make_widget(is_graded=True)
+        reset(w)
+        self.assertFalse(w.is_graded)
+        self.assertIsNone(w.graded_at)
+        self.assertIsNone(w.graded_by)
 
     # get_awarded_points / get_possible_points
     def test_get_awarded_points(self):
