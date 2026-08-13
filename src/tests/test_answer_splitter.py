@@ -82,6 +82,30 @@ Proof text
         self.assertEqual(answers["Q1"], "A\n\nB")
         self.assertIn("duplicate_heading_for_Q1", warnings)
 
+    def test_bare_numbered_headings_match_requested_questions(self):
+        text = "1.\nFirst answer\n\n2)\nSecond answer"
+        answers, warnings = split_answers_by_question(text, ["Q1", "Q2"])
+        self.assertEqual(answers, {"Q1": "First answer", "Q2": "Second answer"})
+        self.assertEqual(warnings, [])
+
+    def test_bare_numbered_subparts_match_requested_questions(self):
+        text = "1(a)\nPart A\n\n1(b).\nPart B"
+        answers, warnings = split_answers_by_question(text, ["Q1A", "Q1B"])
+        self.assertEqual(answers, {"Q1A": "Part A", "Q1B": "Part B"})
+        self.assertEqual(warnings, [])
+
+    def test_bare_numbered_headings_require_requested_question_context(self):
+        text = "1.\nA numbered line with no rubric context."
+        answers, warnings = split_answers_by_question(text)
+        self.assertEqual(answers, {FULL_SUBMISSION: text})
+        self.assertIn("could_not_split_by_question", warnings)
+
+    def test_explicit_headings_disable_bare_numeric_fallback(self):
+        text = "Question 1\nFirst answer\n1.\nA numbered list item"
+        answers, warnings = split_answers_by_question(text, ["Q1"])
+        self.assertEqual(answers, {"Q1": "First answer\n1.\nA numbered list item"})
+        self.assertEqual(warnings, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

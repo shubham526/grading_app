@@ -1,9 +1,9 @@
-"""
-High-level submission parsing APIs.
+"""High-level submission parsing APIs.
 
 Normal submissions are LaTeX-first. PDF-only submissions are accepted only
 through an explicit accommodation path; the original PDF remains authoritative
-and rendered page images / selectable text are derived evidence.
+and rendered page images / selectable text / machine transcription are derived
+assistive evidence.
 """
 
 from __future__ import annotations
@@ -35,6 +35,12 @@ from .pdf import (
     render_pdf_pages,
 )
 from .splitter import FULL_SUBMISSION, split_answers_by_question
+from .transcription import (
+    DEFAULT_HANDWRITING_MODEL,
+    OllamaTranscriptionBackend,
+    TranscriptionBackend,
+    transcribe_page_images,
+)
 
 
 def _split_status(answers: Dict[str, str], warnings: Sequence[str]) -> str:
@@ -43,6 +49,54 @@ def _split_status(answers: Dict[str, str], warnings: Sequence[str]) -> str:
     if any(warning.startswith("missing_answer_for_") for warning in warnings):
         return "partial"
     return "success"
+
+
+def _resolve_transcription_backend(
+    backend: Optional[TranscriptionBackend],
+    options: Optional[Dict[str, Any]],
+) -> TranscriptionBackend:
+    if backend is not None:
+        if options:
+            raise ValueError(
+                "transcription_options cannot be combined with an explicit "
+                "transcription_backend; configure the backend instance directly."
+            )
+        return backend
+    return OllamaTranscriptionBackend(**dict(options or {}))
+
+
+def _not_requested_transcription_metadata() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "status": "not_requested",
+        "assistive_only": True,
+        "authoritative": False,
+        "pages": [],
+    }
+
+
+def _unavailable_transcription_metadata(
+    *,
+    backend: Optional[TranscriptionBackend],
+    options: Optional[Dict[str, Any]],
+    warning: str,
+) -> Dict[str, Any]:
+    model = backend.model_name if backend is not None else str(
+        (options or {}).get("model", DEFAULT_HANDWRITING_MODEL)
+    )
+    backend_name = backend.backend_name if backend is not None else "ollama"
+    prompt_version = backend.prompt_version if backend is not None else None
+    return {
+        "enabled": True,
+        "status": "unavailable",
+        "backend": backend_name,
+        "model": model,
+        "prompt_version": prompt_version,
+        "warnings": [warning],
+        "assistive_only": True,
+        "authoritative": False,
+        "pages": [],
+    }
 
 
 def _parse_record(
@@ -111,6 +165,9 @@ def _parse_pdf_accommodation_record(
     render_dpi: int,
     min_text_chars_per_page: int,
     pdf_options: Optional[Dict[str, Any]],
+    transcribe_handwriting: bool,
+    transcription_backend: Optional[TranscriptionBackend],
+    transcription_options: Optional[Dict[str, Any]],
 ) -> ParsedSubmission:
     pdf_path = record.pdf_path
     if not pdf_path:
@@ -128,9 +185,9 @@ def _parse_pdf_accommodation_record(
     warnings = list(record.warnings)
     warnings.extend(extraction_meta.get("warnings", []))
 
-    # Sparse/no text is common for handwritten scans. Do not split a tiny text
-    # layer (often only a printed header) into answer content: that risks showing
-    # the grader the wrong evidence. Commit 3 will add explicit VLM transcription.
+    # Selectable text can be useful for typed accommodations. Sparse/no text is
+    # common for handwritten scans and must not be promoted to answer content:
+    # a tiny text layer may contain only a printed header or scanner metadata.
     split_warnings = []
     if extraction_meta.get("selectable_text") and text.strip():
         answers, split_warnings = split_answers_by_question(text, question_ids)
@@ -163,6 +220,53 @@ def _parse_pdf_accommodation_record(
     if rendering.success and rendering.output_dir:
         files["rendered_pages_dir"] = rendering.output_dir
 
+    transcription_requested = bool(transcribe_handwriting or transcription_backend is not None)
+    transcription_meta = _not_requested_transcription_metadata()
+
+    if transcription_requested:
+        if not rendering.success or not rendering.pages:
+            transcription_meta = _unavailable_transcription_metadata(
+                backend=transcription_backend,
+                options=transcription_options,
+                warning="page_images_unavailable",
+            )
+            warnings.append("transcription_unavailable")
+        else:
+            backend = _resolve_transcription_backend(
+                transcription_backend,
+                transcription_options,
+            )
+            batch = transcribe_page_images(
+                backend,
+                [page.image_path for page in rendering.pages],
+            )
+            transcription_meta = batch.to_metadata()
+            transcription_meta["enabled"] = True
+            warnings.extend(batch.warnings)
+
+            # Machine transcription may assist question mapping only when the
+            # PDF's selectable-text path was insufficient AND every page has a
+            # complete usable transcription. A partial/capped/degenerate batch
+            # is retained page-by-page but is never silently treated as the full
+            # student submission.
+            machine_text = batch.combined_text()
+            if (
+                not extraction_meta.get("selectable_text")
+                and machine_text
+                and batch.all_pages_usable
+            ):
+                answers, machine_split_warnings = split_answers_by_question(
+                    machine_text,
+                    question_ids,
+                )
+                warnings.extend(machine_split_warnings)
+                question_split_status = _split_status(answers, machine_split_warnings)
+                answer_text_source = "machine_transcription"
+            elif not extraction_meta.get("selectable_text"):
+                answers = {}
+                question_split_status = "unavailable"
+                answer_text_source = None
+
     metadata: Dict[str, Any] = {
         "source_priority": ["pdf"],
         "canonical_source": "pdf",
@@ -174,6 +278,7 @@ def _parse_pdf_accommodation_record(
         "question_split_status": question_split_status,
         "extraction": extraction_meta,
         "rendering": rendering.to_metadata(),
+        "transcription": transcription_meta,
         "accommodation_mode": True,
     }
 
@@ -199,8 +304,18 @@ def parse_pdf_accommodation(
     render_dpi: int = DEFAULT_RENDER_DPI,
     min_text_chars_per_page: int = DEFAULT_MIN_TEXT_CHARS_PER_PAGE,
     pdf_options: Optional[Dict[str, Any]] = None,
+    transcribe_handwriting: bool = False,
+    transcription_backend: Optional[TranscriptionBackend] = None,
+    transcription_options: Optional[Dict[str, Any]] = None,
 ) -> ParsedSubmission:
-    """Parse one explicitly authorized PDF accommodation submission."""
+    """Parse one explicitly authorized PDF accommodation submission.
+
+    Handwriting transcription is opt-in at this backend layer so tests and
+    grading remain functional without Ollama. When enabled without an explicit
+    backend, the production default is Ollama + ``gemma4:31b``. Passing a
+    backend instance also enables transcription and is the intended hook for
+    tests or future alternative backends.
+    """
     record = record_from_pdf_accommodation(submission_path, student_id=student_id)
     return _parse_pdf_accommodation_record(
         record,
@@ -209,6 +324,9 @@ def parse_pdf_accommodation(
         render_dpi=render_dpi,
         min_text_chars_per_page=min_text_chars_per_page,
         pdf_options=pdf_options,
+        transcribe_handwriting=transcribe_handwriting,
+        transcription_backend=transcription_backend,
+        transcription_options=transcription_options,
     )
 
 
@@ -225,12 +343,16 @@ def parse_submission(
     render_dpi: int = DEFAULT_RENDER_DPI,
     min_text_chars_per_page: int = DEFAULT_MIN_TEXT_CHARS_PER_PAGE,
     pdf_options: Optional[Dict[str, Any]] = None,
+    transcribe_handwriting: bool = False,
+    transcription_backend: Optional[TranscriptionBackend] = None,
+    transcription_options: Optional[Dict[str, Any]] = None,
 ) -> ParsedSubmission:
     """Parse one submission.
 
     Normal calls accept LaTeX only. A PDF is accepted only when
     ``accommodation_mode=True``; this explicit flag prevents an invalid normal
     PDF-only submission from being silently interpreted as an accommodation.
+    Handwriting transcription is available only on that explicit PDF path.
     """
     requested_path = Path(submission_path).expanduser()
     if requested_path.is_symlink():
@@ -238,6 +360,8 @@ def parse_submission(
     path = requested_path.resolve()
     if not path.exists():
         raise FileNotFoundError(str(path))
+
+    transcription_requested = bool(transcribe_handwriting or transcription_backend is not None)
 
     if accommodation_mode:
         return parse_pdf_accommodation(
@@ -248,6 +372,14 @@ def parse_submission(
             render_dpi=render_dpi,
             min_text_chars_per_page=min_text_chars_per_page,
             pdf_options=pdf_options,
+            transcribe_handwriting=transcribe_handwriting,
+            transcription_backend=transcription_backend,
+            transcription_options=transcription_options,
+        )
+
+    if transcription_requested or transcription_options:
+        raise ValueError(
+            "Handwriting transcription is supported only for explicit PDF accommodations."
         )
 
     if path.is_file():
@@ -312,13 +444,27 @@ def parse_pdf_accommodations(
     render_dpi: int = DEFAULT_RENDER_DPI,
     min_text_chars_per_page: int = DEFAULT_MIN_TEXT_CHARS_PER_PAGE,
     pdf_options: Optional[Dict[str, Any]] = None,
+    transcribe_handwriting: bool = False,
+    transcription_backend: Optional[TranscriptionBackend] = None,
+    transcription_options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, ParsedSubmission]:
     """Parse an explicit ``student_id -> PDF/path`` accommodation mapping.
 
-    The mapping itself is the only stored accommodation signal. No reason or
-    medical/disability detail is accepted by this API.
+    One backend instance is reused across the batch so Ollama preflight/model
+    loading is cached. The mapping itself is the only stored accommodation
+    signal; no reason or medical/disability detail is accepted by this API.
     """
     parsed: Dict[str, ParsedSubmission] = {}
+    transcription_requested = bool(transcribe_handwriting or transcription_backend is not None)
+    shared_backend = transcription_backend
+    if transcription_requested:
+        shared_backend = _resolve_transcription_backend(
+            transcription_backend,
+            transcription_options,
+        )
+        # Options have already been consumed by the shared instance.
+        transcription_options = None
+
     for raw_student_id, path in accommodations.items():
         student_id = normalize_student_id(raw_student_id)
         if not student_id:
@@ -334,6 +480,9 @@ def parse_pdf_accommodations(
             render_dpi=render_dpi,
             min_text_chars_per_page=min_text_chars_per_page,
             pdf_options=pdf_options,
+            transcribe_handwriting=transcription_requested,
+            transcription_backend=shared_backend,
+            transcription_options=None,
         )
     return parsed
 

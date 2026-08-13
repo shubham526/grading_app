@@ -1,11 +1,12 @@
-"""
-Submission ingestion for the Rubric Grading Tool.
+"""Submission ingestion for the Rubric Grading Tool.
 
-v2.2.0 commits 1-2 provide two intentionally separate paths:
+v2.2.0 commits 1-3 provide three intentionally separated backend layers:
 
 * normal submissions: canonical LaTeX source, app-compiled visual PDF;
-* explicit PDF accommodations: original PDF is authoritative, pages are rendered
-  at a deterministic DPI, and any selectable text is assistive only.
+* explicit PDF accommodations: original PDF is authoritative and pages are
+  rendered at a deterministic DPI;
+* optional assistive handwriting transcription: page-aligned VLM output that
+  never replaces the original PDF or rendered page evidence.
 
 This package intentionally has no PyQt dependency so its backend can be tested
 and reused independently of the desktop UI.
@@ -51,18 +52,50 @@ from .pdf import (
     render_pdf_pages,
 )
 from .splitter import FULL_SUBMISSION, normalize_heading_question_id, split_answers_by_question
+from .transcription import (
+    DEFAULT_HANDWRITING_MODEL,
+    DEFAULT_KEEP_ALIVE,
+    DEFAULT_NUM_CTX,
+    DEFAULT_NUM_PREDICT,
+    DEFAULT_OLLAMA_URL,
+    DEFAULT_SEED,
+    DEFAULT_TEMPERATURE,
+    HANDWRITING_PROMPT_SHA256,
+    HANDWRITING_PROMPT_VERSION,
+    HANDWRITING_TRANSCRIPTION_PROMPT,
+    OllamaTranscriptionBackend,
+    PageTranscription,
+    TranscriptionBackend,
+    TranscriptionBatchResult,
+    TranscriptionPreflightResult,
+    TranscriptionStatus,
+    detect_degenerate_repetition,
+    transcribe_page_images,
+)
 
 __all__ = [
     "ALLOWED_ENGINES",
     "CompilationResult",
+    "DEFAULT_HANDWRITING_MODEL",
+    "DEFAULT_KEEP_ALIVE",
     "DEFAULT_MAX_PAGE_PIXELS",
     "DEFAULT_MAX_PDF_BYTES",
     "DEFAULT_MAX_PDF_PAGES",
     "DEFAULT_MIN_TEXT_CHARS_PER_PAGE",
+    "DEFAULT_NUM_CTX",
+    "DEFAULT_NUM_PREDICT",
+    "DEFAULT_OLLAMA_URL",
     "DEFAULT_RENDER_DPI",
+    "DEFAULT_SEED",
+    "DEFAULT_TEMPERATURE",
     "FULL_SUBMISSION",
+    "HANDWRITING_PROMPT_SHA256",
+    "HANDWRITING_PROMPT_VERSION",
+    "HANDWRITING_TRANSCRIPTION_PROMPT",
     "MAX_RENDER_DPI",
     "MIN_RENDER_DPI",
+    "OllamaTranscriptionBackend",
+    "PageTranscription",
     "ParsedSubmission",
     "PdfPageArtifact",
     "PdfRenderResult",
@@ -72,9 +105,14 @@ __all__ = [
     "SUBMISSION_MODE_LATEX",
     "SUBMISSION_MODE_PDF_ACCOMMODATION",
     "SubmissionRecord",
+    "TranscriptionBackend",
+    "TranscriptionBatchResult",
+    "TranscriptionPreflightResult",
+    "TranscriptionStatus",
     "cleanup_compilation_artifacts",
     "cleanup_pdf_render_artifacts",
     "compile_tex_to_pdf",
+    "detect_degenerate_repetition",
     "discover_submissions",
     "extract_text_from_pdf",
     "extract_text_from_tex",
@@ -90,4 +128,5 @@ __all__ = [
     "render_pdf_pages",
     "split_answers_by_question",
     "strip_latex_comment",
+    "transcribe_page_images",
 ]

@@ -3,8 +3,8 @@ Data models for submission ingestion.
 
 The submission package is intentionally independent of the PyQt UI and scoring
 modules. Its objects describe source files, parsed question answers, LaTeX
-compilation results, and PDF page-rendering artifacts without changing rubric
-or assessment semantics.
+compilation results, PDF page-rendering artifacts, and references to assistive
+transcription metadata without changing rubric or assessment semantics.
 """
 
 from __future__ import annotations
@@ -156,6 +156,20 @@ class ParsedSubmission:
             if isinstance(page, dict) and page.get("image_path"):
                 paths.append(str(page["image_path"]))
         return paths
+
+    @property
+    def transcription_metadata(self) -> Dict[str, Any]:
+        """Return JSON-friendly assistive transcription metadata, if present."""
+        value = self.metadata.get("transcription", {})
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def page_transcriptions(self) -> List[Dict[str, Any]]:
+        """Return page-aligned transcription records without making them canonical."""
+        pages = self.transcription_metadata.get("pages", [])
+        if not isinstance(pages, list):
+            return []
+        return [page for page in pages if isinstance(page, dict)]
 
 
 __all__ = [

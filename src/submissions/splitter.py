@@ -40,6 +40,17 @@ _LATEX_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bare numeric headings are common in handwritten work and VLM transcriptions
+# (for example ``1.`` or ``2(a)``).  They are intentionally handled only as
+# a conservative fallback when the caller supplies expected question IDs and
+# no explicit Question/Q/Problem/P headings were found.
+_BARE_NUMBER_HEADING_RE = re.compile(
+    r"^\s*(?:\(\s*)?(\d+)"
+    r"(?:\s*\(\s*([A-Z])\s*\)|\s*([A-Z]))?"
+    r"\s*(?:\))?\s*([.:)]?)\s*$",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class _Heading:
@@ -60,7 +71,8 @@ def normalize_heading_question_id(raw: str) -> Optional[str]:
     return f"Q{number}{subpart}"
 
 
-def _heading_from_line(line: str, line_index: int) -> Optional[_Heading]:
+def _explicit_heading_from_line(line: str, line_index: int) -> Optional[_Heading]:
+    """Return a prefixed/LaTeX heading, never a bare numeric line."""
     match = _LATEX_HEADING_RE.match(line)
     if match is None:
         match = _PLAIN_HEADING_RE.match(line)
@@ -98,6 +110,49 @@ def _heading_from_line(line: str, line_index: int) -> Optional[_Heading]:
     )
 
 
+def _bare_numeric_heading_from_line(
+    line: str,
+    line_index: int,
+    requested: Sequence[str],
+) -> Optional[_Heading]:
+    """Recognize a bare numeric heading only when it matches an expected ID.
+
+    Requiring the rubric/question context keeps ordinary numbered prose and
+    equations from being promoted to question boundaries.  A punctuation mark
+    or parenthesized form is also required, so a line containing only ``1`` is
+    not enough to create a boundary.
+    """
+    if not requested:
+        return None
+
+    match = _BARE_NUMBER_HEADING_RE.fullmatch(line)
+    if match is None:
+        return None
+
+    number = str(int(match.group(1)))
+    subpart = (match.group(2) or match.group(3) or "").upper()
+    punctuation = match.group(4) or ""
+
+    stripped = line.strip()
+    parenthesized = (
+        stripped.startswith("(")
+        or "(" in stripped
+        or stripped.endswith(")")
+    )
+    if not punctuation and not parenthesized:
+        return None
+
+    question_id = f"Q{number}{subpart}"
+    if question_id not in requested:
+        return None
+
+    return _Heading(
+        line_index=line_index,
+        question_id=question_id,
+        trailing_text="",
+    )
+
+
 def _normalize_requested(question_ids: Optional[Sequence[str]]) -> List[str]:
     if not question_ids:
         return []
@@ -131,13 +186,23 @@ def split_answers_by_question(
         raise TypeError("text must be a string")
 
     lines = text.splitlines()
+    requested = _normalize_requested(question_ids)
+
+    # Prefer explicit headings.  Only when an entire submission lacks them do
+    # we fall back to bare numeric headings such as ``1.`` / ``2(a)`` and only
+    # when those labels match caller-supplied expected question IDs.
     headings: List[_Heading] = []
     for index, line in enumerate(lines):
-        heading = _heading_from_line(line, index)
+        heading = _explicit_heading_from_line(line, index)
         if heading is not None:
             headings.append(heading)
 
-    requested = _normalize_requested(question_ids)
+    if not headings and requested:
+        for index, line in enumerate(lines):
+            heading = _bare_numeric_heading_from_line(line, index, requested)
+            if heading is not None:
+                headings.append(heading)
+
     warnings: List[str] = []
 
     if not headings:
