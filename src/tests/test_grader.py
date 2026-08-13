@@ -36,20 +36,14 @@ from unittest.mock import MagicMock
 import importlib.util as _ilu
 
 # ---------------------------------------------------------------------------
-# Suppress all Qt / GUI imports
+# Qt isolation
 # ---------------------------------------------------------------------------
-
-_QT_MOCKS = [
-    "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
-    "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
-    "matplotlib", "matplotlib.backends",
-    "matplotlib.backends.backend_qt5agg", "matplotlib.figure",
-    "qtawesome",
-]
-for _m in _QT_MOCKS:
-    if _m not in sys.modules:
-        sys.modules[_m] = MagicMock()
-sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+# This test module deliberately does not import CriterionWidget.  The widget's
+# business logic is exercised through the standalone equivalents below, so no
+# Qt stubs are required here.  In particular, do not inject fake PyQt5 modules
+# into sys.modules: unittest discovery imports test modules into one process,
+# and global stubs would make later real-Qt widget tests see MagicMock instead
+# of the installed PyQt5 package.
 
 _REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, _REPO_ROOT)

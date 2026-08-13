@@ -1,249 +1,239 @@
-"""
-Criterion Widget for Rubric Grading Tool.
+"""Criterion widget for manual rubric grading.
 
-This module defines the UI component that represents a single criterion in the rubric.
+Commit 5 changes only presentation and layout density here.  Scoring, explicit
+zero handling, achievement-level behavior, dirty-state signals, comments, and
+saved-data semantics remain the same as v2.1.
 """
 
-from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                           QSpinBox, QCheckBox, QGroupBox, QTextEdit, QSizePolicy, QDoubleSpinBox)
-from PyQt5.QtCore import Qt, pyqtSignal
 from datetime import datetime, timezone
+
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+)
 
 from src.ui.widgets.math_editor import MarkdownMathEditor
 
 
 class CriterionWidget(QFrame):
-    """Widget representing a single criterion from the rubric."""
+    """Widget representing one rubric criterion."""
 
-    # Existing scoring signal plus a broader edit signal used by the v2.1
-    # question-centric dirty-state tracker.
     points_changed = pyqtSignal()
     content_changed = pyqtSignal()
 
     def __init__(self, criterion_data, parent=None):
-        """
-        Initialize the criterion widget.
-
-        Args:
-            criterion_data (dict): Dictionary containing the criterion definition
-            parent (QWidget, optional): Parent widget
-        """
         super().__init__(parent)
-        self.setFrameStyle(QFrame.Box | QFrame.Raised)
-        self.setLineWidth(1)
         self.criterion_data = criterion_data
 
-        # v2.1 explicit grading state.  The spin box visually defaults to 0, so
-        # a separate flag is required to distinguish "not graded yet" from an
-        # intentional score of zero.
+        # Explicit grading state distinguishes an untouched visual zero from an
+        # intentionally awarded zero.
         self.is_graded = False
         self.graded_at = None
         self.graded_by = None
         self._loading_data = False
 
-        # Apply material design style
-        self.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-radius: 4px;
-                border: 1px solid #EEEEEE;
-                margin: 4px;
-                padding: 8px;
+        self.setObjectName("criterionCard")
+        self.setFrameShape(QFrame.NoFrame)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setup_ui()
+        self._apply_style()
+
+    def _apply_style(self):
+        self.setStyleSheet(
+            """
+            QFrame#criterionCard {
+                background-color: #FFFFFF;
+                border: 1px solid #D9DEE7;
+                border-radius: 8px;
             }
-            QFrame:hover {
-                border: 1px solid #BDBDBD;
-                background-color: #FAFAFA;
-            }
-            QLabel[labelType="criterionTitle"] {
+            QLabel#criterionTitle {
+                color: #1F2937;
                 font-size: 14px;
-                font-weight: bold;
-                color: #3F51B5;
+                font-weight: 600;
+                background: transparent;
             }
-            QLabel[labelType="criterionDescription"] {
-                color: #757575;
-                font-style: italic;
-                margin-bottom: 8px;
+            QLabel#criterionDescription {
+                color: #667085;
+                background: transparent;
             }
-            QGroupBox {
-                margin-top: 16px;
+            QLabel#criterionMeta {
+                color: #667085;
+                background: transparent;
+            }
+            QFrame#pointsPanel {
+                background-color: #F9FAFB;
+                border: 1px solid #E6E9EF;
+                border-radius: 6px;
+            }
+            QDoubleSpinBox#criterionPoints {
+                min-width: 72px;
+                padding: 5px 7px;
+                color: #1F2937;
+                background-color: #FFFFFF;
+                border: 1px solid #D9DEE7;
+                border-radius: 5px;
+            }
+            QDoubleSpinBox#criterionPoints:focus {
+                border: 1px solid #3B5CCC;
+            }
+            QGroupBox#achievementLevels {
+                color: #1F2937;
+                font-weight: 600;
+                border: 1px solid #E6E9EF;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 10px;
+                background-color: #FFFFFF;
+            }
+            QGroupBox#achievementLevels::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QFrame[levelRow="true"] {
+                background: transparent;
+                border: none;
+                border-radius: 5px;
+            }
+            QFrame[levelRow="true"]:hover {
+                background-color: #F9FAFB;
             }
             QCheckBox {
-                padding: 4px;
-                border-radius: 4px;
+                color: #1F2937;
+                spacing: 7px;
+                padding: 2px;
+                background: transparent;
             }
             QCheckBox:hover {
-                background-color: #F5F5F5;
+                color: #304DAF;
             }
-            QTextEdit {
-                border: 1px solid #BDBDBD;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QTextEdit:focus {
-                border: 2px solid #3F51B5;
-            }
-        """)
-
-        self.setup_ui()
+            """
+        )
 
     def setup_ui(self):
-        """Set up the user interface for this criterion."""
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 14)
+        layout.setSpacing(10)
 
-        # Criterion title with styled font
-        title_label = QLabel(self.criterion_data.get("title", "Untitled Criterion"))
+        title_label = QLabel(self.criterion_data.get("title", "Untitled Criterion"), self)
+        title_label.setObjectName("criterionTitle")
         title_label.setProperty("labelType", "criterionTitle")
+        title_label.setWordWrap(True)
         layout.addWidget(title_label)
 
-        # Description
         description = self.criterion_data.get("description", "")
         if description:
-            desc_label = QLabel(description)
+            desc_label = QLabel(str(description), self)
+            desc_label.setObjectName("criterionDescription")
             desc_label.setProperty("labelType", "criterionDescription")
             desc_label.setWordWrap(True)
             layout.addWidget(desc_label)
 
-        # Points controls in a styled container
-        points_container = QFrame()
-        points_container.setStyleSheet("""
-            QFrame {
-                background-color: #F5F5F5;
-                border-radius: 4px;
-                border: none;
-                margin: 0px;
-                padding: 8px;
-            }
-        """)
+        points_container = QFrame(self)
+        points_container.setObjectName("pointsPanel")
         points_layout = QHBoxLayout(points_container)
-        points_layout.setContentsMargins(8, 8, 8, 8)
+        points_layout.setContentsMargins(10, 7, 10, 7)
+        points_layout.setSpacing(8)
 
-        points_label = QLabel("Points:")
-        points_label.setStyleSheet("font-weight: bold;")
+        points_label = QLabel("Points", points_container)
+        points_label.setStyleSheet("font-weight: 600; color: #1F2937; background: transparent;")
         points_layout.addWidget(points_label)
 
-        self.points_spinbox = QDoubleSpinBox()
-        self.points_spinbox.setDecimals(1)  # Allow one decimal place
-        self.points_spinbox.setSingleStep(0.5)  # Set step to 0.5 points
+        self.points_spinbox = QDoubleSpinBox(points_container)
+        self.points_spinbox.setObjectName("criterionPoints")
+        self.points_spinbox.setDecimals(1)
+        self.points_spinbox.setSingleStep(0.5)
         self.max_points = self.criterion_data.get("points", 10)
         self.points_spinbox.setRange(0, self.max_points)
         self.points_spinbox.setToolTip(f"Maximum points: {self.max_points}")
         self.points_spinbox.valueChanged.connect(self._on_points_value_changed)
         self.points_spinbox.editingFinished.connect(self._on_points_editing_finished)
-        self.points_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: white;
-                border: 1px solid #BDBDBD;
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 60px;
-            }
-            QSpinBox:focus {
-                border: 2px solid #3F51B5;
-            }
-        """)
         points_layout.addWidget(self.points_spinbox)
 
-        points_layout.addWidget(QLabel(f"/ {self.max_points}"))
-        points_layout.addStretch()
+        possible_label = QLabel(f"/ {self.max_points}", points_container)
+        possible_label.setObjectName("criterionMeta")
+        points_layout.addWidget(possible_label)
+        points_layout.addStretch(1)
         layout.addWidget(points_container)
 
-        # Achievement levels if present
         levels = self.criterion_data.get("levels", [])
         if levels:
-            levels_group = QGroupBox("Achievement Levels")
-            levels_group.setStyleSheet("""
-                QGroupBox {
-                    font-weight: bold;
-                    border: 1px solid #BDBDBD;
-                    border-radius: 4px;
-                    margin-top: 16px;
-                    padding-top: 8px;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px;
-                }
-            """)
-            levels_layout = QVBoxLayout()
+            levels_group = QGroupBox("Achievement Levels", self)
+            levels_group.setObjectName("achievementLevels")
+            levels_layout = QVBoxLayout(levels_group)
+            levels_layout.setContentsMargins(10, 10, 10, 8)
+            levels_layout.setSpacing(4)
 
             self.level_checkboxes = []
             for level in levels:
-                level_container = QFrame()
-                level_container.setStyleSheet("""
-                    QFrame {
-                        border: none;
-                        border-radius: 0px;
-                        margin: 0px;
-                        padding: 0px;
-                    }
-                    QFrame:hover {
-                        background-color: #F5F5F5;
-                    }
-                """)
+                level_container = QFrame(levels_group)
+                level_container.setProperty("levelRow", True)
                 level_layout = QVBoxLayout(level_container)
-                level_layout.setContentsMargins(0, 4, 0, 4)
+                level_layout.setContentsMargins(6, 5, 6, 5)
+                level_layout.setSpacing(4)
 
-                # Checkbox and points in a horizontal layout
-                checkbox_layout = QHBoxLayout()
-
-                level_checkbox = QCheckBox(f"{level.get('title')} ({level.get('points')} pts)")
-                level_checkbox.setStyleSheet("""
-                    QCheckBox {
-                        font-weight: bold;
-                    }
-                """)
+                level_checkbox = QCheckBox(
+                    f"{level.get('title')} ({level.get('points')} pts)",
+                    level_container,
+                )
+                level_checkbox.setStyleSheet("font-weight: 600; background: transparent;")
 
                 level_description = level.get("description", "")
                 if level_description:
-                    level_checkbox.setToolTip(level_description)
+                    level_checkbox.setToolTip(str(level_description))
 
                 level_checkbox.clicked.connect(self.update_points_from_level)
                 self.level_checkboxes.append((level_checkbox, level.get("points", 0)))
-                checkbox_layout.addWidget(level_checkbox)
+                level_layout.addWidget(level_checkbox)
 
-                # Show points on the right
-                # points_label = QLabel(f"{level.get('points')} pts")
-                # points_label.setStyleSheet("color: #757575;")
-                # checkbox_layout.addWidget(points_label)
-
-                level_layout.addLayout(checkbox_layout)
-
-                # Show description if available
                 if level_description:
-                    desc_label = QLabel(level_description)
+                    desc_label = QLabel(str(level_description), level_container)
+                    desc_label.setObjectName("criterionMeta")
                     desc_label.setWordWrap(True)
-                    desc_label.setStyleSheet("color: #757575; padding-left: 24px; font-size: 12px;")
+                    desc_label.setStyleSheet(
+                        "color: #667085; padding-left: 24px; font-size: 12px; background: transparent;"
+                    )
                     level_layout.addWidget(desc_label)
 
                 levels_layout.addWidget(level_container)
 
-            levels_group.setLayout(levels_layout)
             layout.addWidget(levels_group)
 
-        # Comments area with improved styling
-        # layout.addWidget(QLabel("Comments:"))
-        # self.comments_edit = QTextEdit()
-        # self.comments_edit.setPlaceholderText("Add your feedback here...")
-        # self.comments_edit.setMinimumHeight(80)  # Set minimum height instead
-        # # Set size policy to allow vertical expansion
-        # size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # self.comments_edit.setSizePolicy(size_policy)
-        # layout.addWidget(self.comments_edit)
-        comment_label = QLabel("Comments (supports Markdown and LaTeX math with $...$ or $$...$$):")
+        comment_label = QLabel(
+            "Comments  ·  Markdown and LaTeX math supported with $...$ or $$...$$",
+            self,
+        )
+        comment_label.setObjectName("criterionMeta")
         layout.addWidget(comment_label)
-        self.comments_edit = MarkdownMathEditor()
-        self.comments_edit.setMinimumHeight(150)  # Make it a bit taller to accommodate the preview
-        size_policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.comments_edit.setSizePolicy(size_policy)
-        # MarkdownMathEditor intentionally exposes its inner QTextEdit.  Listen
-        # to text changes so comment-only edits participate in question-mode
-        # dirty tracking without treating a comment as an awarded score.
+
+        self.comments_edit = MarkdownMathEditor(self)
+        self.comments_edit.setMinimumHeight(120)
+        self.comments_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         if hasattr(self.comments_edit, "editor"):
+            self.comments_edit.editor.setPlaceholderText("Add grading feedback…")
+            self.comments_edit.editor.setStyleSheet(
+                """
+                QTextEdit {
+                    color: #1F2937;
+                    background-color: #FFFFFF;
+                    border: 1px solid #D9DEE7;
+                    border-radius: 6px;
+                    padding: 7px;
+                }
+                QTextEdit:focus {
+                    border: 1px solid #3B5CCC;
+                }
+                """
+            )
             self.comments_edit.editor.textChanged.connect(self._on_comment_changed)
         layout.addWidget(self.comments_edit)
-
-        self.setLayout(layout)
 
     def _mark_graded(self):
         """Mark the criterion graded and refresh its grading timestamp."""
@@ -269,13 +259,7 @@ class CriterionWidget(QFrame):
         self.content_changed.emit()
 
     def _on_points_editing_finished(self):
-        """
-        Treat an explicitly entered unchanged value (especially 0) as graded.
-
-        QDoubleSpinBox.valueChanged is not emitted when the user confirms the
-        value already displayed.  editingFinished lets a deliberate zero be
-        distinguished from an untouched default zero.
-        """
+        """Treat an explicitly confirmed unchanged value (especially zero) as graded."""
         if self._loading_data:
             return
         was_graded = self.is_graded
@@ -288,14 +272,10 @@ class CriterionWidget(QFrame):
         """Update the points value based on the selected achievement level."""
         sender = self.sender()
 
-        # Uncheck other boxes
-        for checkbox, points in self.level_checkboxes:
+        for checkbox, _points in self.level_checkboxes:
             if checkbox != sender and checkbox.isChecked():
                 checkbox.setChecked(False)
 
-        # Update points if a box is checked.  If the selected level has the
-        # same numeric value already displayed, valueChanged will not fire, so
-        # explicitly mark/emit in that one case.
         for checkbox, points in self.level_checkboxes:
             if checkbox.isChecked():
                 previous_value = self.points_spinbox.value()
@@ -306,21 +286,14 @@ class CriterionWidget(QFrame):
                     self.content_changed.emit()
                 return
 
-        # Deselecting the current achievement level changes saved state even
-        # though the numeric score remains unchanged.
         self._mark_graded()
         self.points_changed.emit()
         self.content_changed.emit()
 
     def get_data(self):
-        """
-        Get the current state of this criterion.
-
-        Returns:
-            dict: Dictionary containing the criterion data
-        """
+        """Return the current criterion grading state."""
         selected_level = None
-        for checkbox, _ in getattr(self, 'level_checkboxes', []):
+        for checkbox, _ in getattr(self, "level_checkboxes", []):
             if checkbox.isChecked():
                 selected_level = checkbox.text().split(" (")[0]
 
@@ -341,39 +314,26 @@ class CriterionWidget(QFrame):
         question_id = self.criterion_data.get("question_id")
         if question_id:
             data["question_id"] = question_id
-
         return data
 
     def set_data(self, criterion_data):
-        """
-        Set the widget's data from a criterion data dictionary.
-
-        Args:
-            criterion_data (dict): Dictionary containing the criterion data
-        """
+        """Restore widget state from saved criterion data."""
         self._loading_data = True
         try:
-            # Set points.  Legacy/partial data may use None; the visual control
-            # still displays zero while explicit grading state remains separate.
             points_awarded = criterion_data.get("points_awarded", 0)
             self.points_spinbox.setValue(0 if points_awarded is None else points_awarded)
-
-            # Set comments
             self.comments_edit.set_text(criterion_data.get("comments", ""))
 
-            # Reset and restore level selection if applicable.
-            for checkbox, _ in getattr(self, 'level_checkboxes', []):
+            for checkbox, _ in getattr(self, "level_checkboxes", []):
                 checkbox.setChecked(False)
 
             selected_level = criterion_data.get("selected_level", "")
-            if selected_level and hasattr(self, 'level_checkboxes'):
+            if selected_level and hasattr(self, "level_checkboxes"):
                 for checkbox, _ in self.level_checkboxes:
                     if checkbox.text().split(" (")[0] == selected_level:
                         checkbox.setChecked(True)
                         break
 
-            # v2.1 explicit status is authoritative.  Legacy assessments fall
-            # back to the design rule: points_awarded is not None => graded.
             status = criterion_data.get("grading_status")
             if isinstance(status, dict) and "graded" in status:
                 self.is_graded = bool(status.get("graded"))
@@ -387,16 +347,13 @@ class CriterionWidget(QFrame):
             self._loading_data = False
 
     def reset(self):
-        """Reset the widget to its initial state."""
+        """Reset the widget to its initial ungraded state."""
         self._loading_data = True
         try:
             self.points_spinbox.setValue(0)
             self.comments_edit.clear()
-
-            # Clear checkboxes
-            for checkbox, _ in getattr(self, 'level_checkboxes', []):
+            for checkbox, _ in getattr(self, "level_checkboxes", []):
                 checkbox.setChecked(False)
-
             self.is_graded = False
             self.graded_at = None
             self.graded_by = None
@@ -404,9 +361,7 @@ class CriterionWidget(QFrame):
             self._loading_data = False
 
     def get_awarded_points(self):
-        """Get the number of points awarded for this criterion."""
         return self.points_spinbox.value()
 
     def get_possible_points(self):
-        """Get the maximum possible points for this criterion."""
         return self.criterion_data.get("points", 0)

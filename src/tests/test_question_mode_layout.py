@@ -7,13 +7,27 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 
-for module in (
-    "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
-    "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
-):
-    if module not in sys.modules:
-        sys.modules[module] = MagicMock()
-sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+# Preserve headless-CI compatibility without poisoning the process when real
+# PyQt5 is installed.  unittest discovery imports every test module into the
+# same interpreter, so unconditional sys.modules mocks leak into later tests.
+def _install_qt_stubs_only_if_unavailable():
+    try:
+        import PyQt5  # noqa: F401
+        from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: F401
+        return False
+    except (ImportError, ModuleNotFoundError):
+        qt_modules = (
+            "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
+            "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
+        )
+        for module_name in qt_modules:
+            if module_name not in sys.modules:
+                sys.modules[module_name] = MagicMock()
+        sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+        return True
+
+
+_QT_STUBS_ACTIVE = _install_qt_stubs_only_if_unavailable()
 
 _REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, _REPO_ROOT)

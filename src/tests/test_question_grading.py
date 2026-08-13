@@ -15,17 +15,28 @@ import unittest
 from unittest.mock import MagicMock
 
 
-# Keep the core package importable in headless CI environments.  The existing
-# project tests use the same strategy because src.core.__init__ imports the
-# PyQt-backed assessment module.
-_QT_MOCKS = [
-    "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
-    "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
-]
-for _module in _QT_MOCKS:
-    if _module not in sys.modules:
-        sys.modules[_module] = MagicMock()
-sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+# Keep the pure-data tests usable on CI machines that genuinely do not have
+# PyQt5, but never replace an installed PyQt5 package with MagicMock.  The old
+# unconditional sys.modules stubs leaked across unittest discovery and caused
+# the real Commit-5 widget tests to be skipped when the full suite was run.
+def _install_qt_stubs_only_if_unavailable():
+    try:
+        import PyQt5  # noqa: F401
+        from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: F401
+        return False
+    except (ImportError, ModuleNotFoundError):
+        qt_modules = (
+            "PyQt5", "PyQt5.QtWidgets", "PyQt5.QtGui", "PyQt5.QtCore",
+            "PyQt5.QtSvg", "PyQt5.QtPrintSupport",
+        )
+        for module_name in qt_modules:
+            if module_name not in sys.modules:
+                sys.modules[module_name] = MagicMock()
+        sys.modules["PyQt5.QtCore"].pyqtSignal = lambda *a, **kw: MagicMock()
+        return True
+
+
+_QT_STUBS_ACTIVE = _install_qt_stubs_only_if_unavailable()
 
 
 _REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
