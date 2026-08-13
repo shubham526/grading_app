@@ -35,6 +35,14 @@ from .pdf import (
     render_pdf_pages,
 )
 from .splitter import FULL_SUBMISSION, split_answers_by_question
+from .storage import (
+    build_transcription_cache_inputs,
+    compute_file_sha256,
+    evidence_storage_paths,
+    load_cached_transcription,
+    persist_submission_evidence,
+    save_transcription_cache,
+)
 from .transcription import (
     DEFAULT_HANDWRITING_MODEL,
     OllamaTranscriptionBackend,
@@ -106,6 +114,7 @@ def _parse_record(
     compile_pdf: bool,
     compilation_dir: Optional[str],
     compiler_options: Optional[Dict[str, Any]],
+    evidence_dir: Optional[str],
 ) -> ParsedSubmission:
     latex_path = record.latex_path
     if not latex_path:
@@ -144,7 +153,7 @@ def _parse_record(
         else:
             warnings.append(compilation.error_code or "latex_compilation_failed")
 
-    return ParsedSubmission(
+    parsed = ParsedSubmission(
         student_id=record.student_id,
         submission_mode=SUBMISSION_MODE_LATEX,
         accommodation_mode=False,
@@ -155,6 +164,9 @@ def _parse_record(
         warnings=list(dict.fromkeys(warnings)),
         metadata=metadata,
     )
+    if evidence_dir is not None:
+        parsed = persist_submission_evidence(parsed, evidence_dir)
+    return parsed
 
 
 def _parse_pdf_accommodation_record(
@@ -168,6 +180,8 @@ def _parse_pdf_accommodation_record(
     transcribe_handwriting: bool,
     transcription_backend: Optional[TranscriptionBackend],
     transcription_options: Optional[Dict[str, Any]],
+    evidence_dir: Optional[str],
+    reuse_cached_transcription: bool,
 ) -> ParsedSubmission:
     pdf_path = record.pdf_path
     if not pdf_path:
@@ -199,12 +213,24 @@ def _parse_pdf_accommodation_record(
         question_split_status = "unavailable"
         answer_text_source = None
 
+    persistent_paths = None
+    if evidence_dir is not None:
+        if render_dir is not None:
+            raise ValueError("render_dir cannot be combined with evidence_dir")
+        persistent_paths = evidence_storage_paths(
+            evidence_dir,
+            record.student_id,
+            create=True,
+        )
+
     render_options = {
         key: value
         for key, value in options.items()
         if key in {"max_pdf_bytes", "max_pages", "max_page_pixels"}
     }
-    if render_dir is not None:
+    if persistent_paths is not None:
+        render_options["output_dir"] = persistent_paths.pages_dir
+    elif render_dir is not None:
         student_render_dir = Path(render_dir).expanduser().resolve() / record.student_id
         render_options["output_dir"] = str(student_render_dir)
     elif "output_dir" in options:
@@ -230,18 +256,63 @@ def _parse_pdf_accommodation_record(
                 options=transcription_options,
                 warning="page_images_unavailable",
             )
+            transcription_meta["cache"] = {
+                "status": "disabled" if persistent_paths is None else "miss",
+                "reason": "page_images_unavailable",
+            }
             warnings.append("transcription_unavailable")
         else:
             backend = _resolve_transcription_backend(
                 transcription_backend,
                 transcription_options,
             )
-            batch = transcribe_page_images(
-                backend,
-                [page.image_path for page in rendering.pages],
-            )
+            image_paths = [page.image_path for page in rendering.pages]
+            batch = None
+            cache_meta: Dict[str, Any] = {"status": "disabled"}
+            cache_inputs = None
+
+            if persistent_paths is not None:
+                source_sha256 = compute_file_sha256(pdf_path)
+                if reuse_cached_transcription:
+                    batch, cache_meta = load_cached_transcription(
+                        persistent_paths.transcription_cache_path,
+                        backend=backend,
+                        image_paths=image_paths,
+                        render_dpi=render_dpi,
+                        source_sha256=source_sha256,
+                    )
+                else:
+                    cache_meta = {
+                        "status": "disabled",
+                        "reason": "reuse_disabled",
+                    }
+
+                # Build inputs separately only when inference is needed; the cache
+                # helper already built them while checking for a hit.
+                if batch is None:
+                    cache_inputs = build_transcription_cache_inputs(
+                        backend=backend,
+                        image_paths=image_paths,
+                        render_dpi=render_dpi,
+                        source_sha256=source_sha256,
+                    )
+
+            if batch is None:
+                batch = transcribe_page_images(backend, image_paths)
+                if persistent_paths is not None and cache_inputs is not None:
+                    stored_cache = save_transcription_cache(
+                        persistent_paths.transcription_cache_path,
+                        batch=batch,
+                        cache_inputs=cache_inputs,
+                    )
+                    cache_meta = {
+                        **cache_meta,
+                        "stored": stored_cache,
+                    }
+
             transcription_meta = batch.to_metadata()
             transcription_meta["enabled"] = True
+            transcription_meta["cache"] = cache_meta
             warnings.extend(batch.warnings)
 
             # Machine transcription may assist question mapping only when the
@@ -282,7 +353,7 @@ def _parse_pdf_accommodation_record(
         "accommodation_mode": True,
     }
 
-    return ParsedSubmission(
+    parsed = ParsedSubmission(
         student_id=record.student_id,
         submission_mode=SUBMISSION_MODE_PDF_ACCOMMODATION,
         accommodation_mode=True,
@@ -293,6 +364,9 @@ def _parse_pdf_accommodation_record(
         warnings=list(dict.fromkeys(warnings)),
         metadata=metadata,
     )
+    if evidence_dir is not None:
+        parsed = persist_submission_evidence(parsed, evidence_dir)
+    return parsed
 
 
 def parse_pdf_accommodation(
@@ -307,6 +381,8 @@ def parse_pdf_accommodation(
     transcribe_handwriting: bool = False,
     transcription_backend: Optional[TranscriptionBackend] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
+    evidence_dir: Optional[str] = None,
+    reuse_cached_transcription: bool = True,
 ) -> ParsedSubmission:
     """Parse one explicitly authorized PDF accommodation submission.
 
@@ -327,6 +403,8 @@ def parse_pdf_accommodation(
         transcribe_handwriting=transcribe_handwriting,
         transcription_backend=transcription_backend,
         transcription_options=transcription_options,
+        evidence_dir=evidence_dir,
+        reuse_cached_transcription=reuse_cached_transcription,
     )
 
 
@@ -346,6 +424,8 @@ def parse_submission(
     transcribe_handwriting: bool = False,
     transcription_backend: Optional[TranscriptionBackend] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
+    evidence_dir: Optional[str] = None,
+    reuse_cached_transcription: bool = True,
 ) -> ParsedSubmission:
     """Parse one submission.
 
@@ -375,6 +455,8 @@ def parse_submission(
             transcribe_handwriting=transcribe_handwriting,
             transcription_backend=transcription_backend,
             transcription_options=transcription_options,
+            evidence_dir=evidence_dir,
+            reuse_cached_transcription=reuse_cached_transcription,
         )
 
     if transcription_requested or transcription_options:
@@ -408,6 +490,7 @@ def parse_submission(
         compile_pdf=compile_pdf,
         compilation_dir=compilation_dir,
         compiler_options=compiler_options,
+        evidence_dir=evidence_dir,
     )
 
 
@@ -418,6 +501,7 @@ def parse_submissions_folder(
     compile_pdf: bool = True,
     compilation_dir: Optional[str] = None,
     compiler_options: Optional[Dict[str, Any]] = None,
+    evidence_dir: Optional[str] = None,
 ) -> Dict[str, ParsedSubmission]:
     """Discover and parse every normal LaTeX submission in a folder.
 
@@ -432,6 +516,7 @@ def parse_submissions_folder(
             compile_pdf=compile_pdf,
             compilation_dir=compilation_dir,
             compiler_options=compiler_options,
+            evidence_dir=evidence_dir,
         )
     return parsed
 
@@ -447,6 +532,8 @@ def parse_pdf_accommodations(
     transcribe_handwriting: bool = False,
     transcription_backend: Optional[TranscriptionBackend] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
+    evidence_dir: Optional[str] = None,
+    reuse_cached_transcription: bool = True,
 ) -> Dict[str, ParsedSubmission]:
     """Parse an explicit ``student_id -> PDF/path`` accommodation mapping.
 
@@ -483,6 +570,8 @@ def parse_pdf_accommodations(
             transcribe_handwriting=transcription_requested,
             transcription_backend=shared_backend,
             transcription_options=None,
+            evidence_dir=evidence_dir,
+            reuse_cached_transcription=reuse_cached_transcription,
         )
     return parsed
 

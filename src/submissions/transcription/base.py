@@ -52,6 +52,20 @@ class TranscriptionBackend(ABC):
         """Transcribe one page image as assistive evidence."""
         raise NotImplementedError
 
+    def cache_identity(self) -> dict:
+        """Return output-relevant identity used for persistent cache keys.
+
+        Backends may override this to include generation parameters and prompt
+        hashes.  Service location, credentials, timeouts, and keep-alive settings
+        should not be included because they do not define the expected model
+        output.
+        """
+        return {
+            "backend": self.backend_name,
+            "model": self.model_name,
+            "prompt_version": self.prompt_version,
+        }
+
 
 def _preflight_failure_status(result: TranscriptionPreflightResult) -> TranscriptionStatus:
     if result.error_code in {

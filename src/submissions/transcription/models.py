@@ -47,6 +47,22 @@ class TranscriptionPreflightResult:
     def to_metadata(self) -> Dict[str, Any]:
         return asdict(self)
 
+    @classmethod
+    def from_metadata(cls, data: Dict[str, Any]) -> "TranscriptionPreflightResult":
+        if not isinstance(data, dict):
+            raise TypeError("preflight metadata must be a dictionary")
+        return cls(
+            ok=bool(data.get("ok", False)),
+            backend=str(data.get("backend", "")),
+            model=str(data.get("model", "")),
+            server_url=data.get("server_url"),
+            capabilities=[str(v) for v in data.get("capabilities", [])],
+            warnings=[str(v) for v in data.get("warnings", [])],
+            error_code=data.get("error_code"),
+            error_message=data.get("error_message"),
+            metadata=dict(data.get("metadata", {}) or {}),
+        )
+
 
 @dataclass
 class PageTranscription:
@@ -77,6 +93,36 @@ class PageTranscription:
         data["status"] = self.status.value
         data["usable"] = self.usable
         return data
+
+    @classmethod
+    def from_metadata(cls, data: Dict[str, Any]) -> "PageTranscription":
+        if not isinstance(data, dict):
+            raise TypeError("page transcription metadata must be a dictionary")
+        raw_status = data.get("status", TranscriptionStatus.INFERENCE_FAILURE.value)
+        try:
+            status = TranscriptionStatus(str(raw_status))
+        except ValueError as exc:
+            raise ValueError(f"Unknown transcription status: {raw_status!r}") from exc
+        return cls(
+            page_number=int(data.get("page_number", 0)),
+            source_image=str(data.get("source_image", "")),
+            text=str(data.get("text", "")),
+            status=status,
+            backend=str(data.get("backend", "")),
+            model=str(data.get("model", "")),
+            prompt_version=str(data.get("prompt_version", "")),
+            duration_seconds=float(data.get("duration_seconds", 0.0) or 0.0),
+            generated_tokens=(
+                int(data["generated_tokens"])
+                if data.get("generated_tokens") is not None
+                else None
+            ),
+            done_reason=data.get("done_reason"),
+            warning=data.get("warning"),
+            metadata=dict(data.get("metadata", {}) or {}),
+            assistive_only=bool(data.get("assistive_only", True)),
+            authoritative=bool(data.get("authoritative", False)),
+        )
 
 
 @dataclass
@@ -140,6 +186,32 @@ class TranscriptionBatchResult:
             "preflight": self.preflight.to_metadata() if self.preflight else None,
             "pages": [page.to_metadata() for page in self.pages],
         }
+
+    @classmethod
+    def from_metadata(cls, data: Dict[str, Any]) -> "TranscriptionBatchResult":
+        if not isinstance(data, dict):
+            raise TypeError("transcription batch metadata must be a dictionary")
+        raw_pages = data.get("pages", [])
+        if not isinstance(raw_pages, list):
+            raise TypeError("transcription batch pages must be a list")
+        pages = [PageTranscription.from_metadata(page) for page in raw_pages]
+        raw_preflight = data.get("preflight")
+        preflight = (
+            TranscriptionPreflightResult.from_metadata(raw_preflight)
+            if isinstance(raw_preflight, dict)
+            else None
+        )
+        return cls(
+            backend=str(data.get("backend", "")),
+            model=str(data.get("model", "")),
+            prompt_version=str(data.get("prompt_version", "")),
+            pages=pages,
+            preflight=preflight,
+            duration_seconds=float(data.get("duration_seconds", 0.0) or 0.0),
+            warnings=[str(v) for v in data.get("warnings", [])],
+            assistive_only=bool(data.get("assistive_only", True)),
+            authoritative=bool(data.get("authoritative", False)),
+        )
 
 
 __all__ = [

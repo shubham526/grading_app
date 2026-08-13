@@ -9,6 +9,7 @@ transcription is reported as unavailable/degraded.
 from __future__ import annotations
 
 import base64
+import hashlib
 from collections import Counter
 import json
 import os
@@ -194,6 +195,22 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
     @property
     def prompt_version(self) -> str:
         return self._prompt_version
+
+    def cache_identity(self) -> Dict[str, Any]:
+        """Return generation-relevant provenance for cache invalidation."""
+        prompt_sha256 = hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()
+        return {
+            "backend": self.backend_name,
+            "model": self.model_name,
+            "prompt_version": self.prompt_version,
+            "prompt_sha256": prompt_sha256,
+            "temperature": self.temperature,
+            "seed": self.seed,
+            "num_ctx": self.num_ctx,
+            "num_predict": self.num_predict,
+            "think": False,
+            "api_mode": "chat",
+        }
 
     def _api_url(self, endpoint: str) -> str:
         endpoint = "/" + endpoint.lstrip("/")

@@ -164,6 +164,12 @@ class ParsedSubmission:
         return value if isinstance(value, dict) else {}
 
     @property
+    def evidence_metadata(self) -> Dict[str, Any]:
+        """Return persistent evidence/provenance metadata, if present."""
+        value = self.metadata.get("evidence", {})
+        return value if isinstance(value, dict) else {}
+
+    @property
     def page_transcriptions(self) -> List[Dict[str, Any]]:
         """Return page-aligned transcription records without making them canonical."""
         pages = self.transcription_metadata.get("pages", [])
