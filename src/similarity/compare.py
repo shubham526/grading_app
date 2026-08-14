@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .hashing import compute_file_sha256, compute_text_sha256
+from .highlight import find_shared_spans
 from .models import FLAG_RANK, PairSimilarity, QuestionSimilarity, SimilaritySignal
 from .normalize import normalize_for_similarity
 from .shingles import jaccard_similarity, make_word_shingles, tokenize_for_similarity
@@ -293,7 +294,7 @@ def _question_similarity(
         ngram_jaccard=score,
         shared_shingle_count=shared_count,
         total_shingle_count=union_count,
-        shared_spans=[],
+        shared_spans=find_shared_spans(answer_a, answer_b, n=n),
         flag_level=flag,
         warnings=warnings,
     )
