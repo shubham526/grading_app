@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,12 @@ class TestSimilarityUiWiringWithoutQt(unittest.TestCase):
         self.assertIn("question_ids=self._submission_question_ids()", source)
         self.assertIn("assessments_dir=self.assessments_dir", source)
         self.assertIn("self.submission_controller.submissions_dir", source)
+
+    def test_dialog_refreshes_question_selector_from_discovered_source(self):
+        source = DIALOG.read_text(encoding="utf-8")
+        self.assertIn("self._refresh_question_options(source.question_ids)", source)
+        self.assertIn("source_question_ids = list(self.initial_question_ids) or None", source)
+        self.assertIn("self.question_combo.addItem(qid, qid)", source)
 
     def test_dialog_uses_shared_backend_instead_of_reimplementing_similarity(self):
         source = DIALOG.read_text(encoding="utf-8")
@@ -101,6 +108,104 @@ class TestSimilarityReviewDialog(unittest.TestCase):
                 "bob": self._submission("bob", text_b),
             },
         )
+
+    @staticmethod
+    def _write_assessment(path, student_id, q1, q2):
+        payload = {
+            "student_id": student_id,
+            "criteria": [
+                {"id": "C1", "question_id": "Q1", "points_awarded": 1},
+                {"id": "C2", "question_id": "Q2", "points_awarded": 1},
+            ],
+            "submission_meta": {
+                "student_id": student_id,
+                "source_used": "latex",
+                "files": {},
+                "file_hashes": {},
+                "warnings": [],
+            },
+            "extracted_answers": {
+                "Q1": q1,
+                "Q2": q2,
+            },
+        }
+        Path(path).write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_assessment_folder_run_populates_discovered_question_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_assessment(
+                Path(tmp) / "alice.json",
+                "alice",
+                "alice q1 unique response",
+                "shared q2 response with enough words for comparison",
+            )
+            self._write_assessment(
+                Path(tmp) / "bob.json",
+                "bob",
+                "bob q1 different response",
+                "shared q2 response with enough words for comparison",
+            )
+
+            dialog = SimilarityReviewDialog(
+                assignment_id="SIM1",
+                question_ids=None,
+            )
+            dialog.source_radios["assessment_folder"].setChecked(True)
+            dialog.source_path_edit.setText(tmp)
+            dialog._remember_source_path()
+            dialog.run_review()
+
+            self.assertEqual(
+                [dialog.question_combo.itemText(i) for i in range(dialog.question_combo.count())],
+                ["All available questions", "Q1", "Q2"],
+            )
+            self.assertEqual(dialog.source_result.question_ids, ["Q1", "Q2"])
+            dialog.close()
+
+    def test_single_question_rerun_filters_report_without_shrinking_selector(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_assessment(
+                Path(tmp) / "alice.json",
+                "alice",
+                "alice q1 unique response",
+                "shared q2 response with enough words for comparison",
+            )
+            self._write_assessment(
+                Path(tmp) / "bob.json",
+                "bob",
+                "bob q1 different response",
+                "shared q2 response with enough words for comparison",
+            )
+
+            dialog = SimilarityReviewDialog(
+                assignment_id="SIM1",
+                question_ids=None,
+            )
+            dialog.source_radios["assessment_folder"].setChecked(True)
+            dialog.source_path_edit.setText(tmp)
+            dialog._remember_source_path()
+
+            # First run discovers and populates Q1/Q2.
+            dialog.run_review()
+            q2_index = dialog.question_combo.findData("Q2")
+            self.assertGreaterEqual(q2_index, 0)
+
+            # Second run is Q2-only, but the source/selector must still retain
+            # all available questions for a later Q1 or All rerun.
+            dialog.question_combo.setCurrentIndex(q2_index)
+            dialog.run_review()
+
+            self.assertEqual(dialog.source_result.question_ids, ["Q1", "Q2"])
+            self.assertEqual(
+                [dialog.question_combo.itemText(i) for i in range(dialog.question_combo.count())],
+                ["All available questions", "Q1", "Q2"],
+            )
+            self.assertEqual(dialog.question_combo.currentData(), "Q2")
+            self.assertEqual(
+                list(dialog.report.pairs[0].question_similarities),
+                ["Q2"],
+            )
+            dialog.close()
 
     def test_dialog_is_resizable_and_defaults_to_loaded_source(self):
         dialog = self._dialog()

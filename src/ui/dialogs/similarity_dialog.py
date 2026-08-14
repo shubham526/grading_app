@@ -176,6 +176,54 @@ class SimilarityReviewDialog(QDialog):
                 ordered.append(qid)
         return ordered
 
+    def _set_question_options(
+        self,
+        question_ids: Sequence[str] | None,
+        *,
+        preserve_selection: bool = True,
+    ):
+        """Populate the question selector from the currently available source.
+
+        The first entry always means "compare all available questions".  When a
+        source exposes concrete question IDs, they are added as individually
+        selectable entries.  A previous single-question selection is preserved
+        only when it still exists in the refreshed source.
+        """
+
+        qids = self._clean_question_ids(question_ids)
+        previous = self.question_combo.currentData() if preserve_selection else None
+
+        self.question_combo.blockSignals(True)
+        try:
+            self.question_combo.clear()
+            all_label = (
+                "All questions"
+                if self.initial_question_ids
+                else "All available questions"
+            )
+            self.question_combo.addItem(all_label, None)
+            for qid in qids:
+                self.question_combo.addItem(qid, qid)
+
+            if previous and previous in qids:
+                index = self.question_combo.findData(previous)
+                self.question_combo.setCurrentIndex(index if index >= 0 else 0)
+            else:
+                self.question_combo.setCurrentIndex(0)
+        finally:
+            self.question_combo.blockSignals(False)
+
+    def _reset_question_options(self):
+        """Reset the selector when the submission source/path changes."""
+        self._set_question_options(
+            self.initial_question_ids,
+            preserve_selection=False,
+        )
+
+    def _refresh_question_options(self, question_ids: Sequence[str] | None):
+        """Refresh the selector after the source has discovered its questions."""
+        self._set_question_options(question_ids, preserve_selection=True)
+
     def _build_ui(self, assignment_id: str):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -244,11 +292,10 @@ class SimilarityReviewDialog(QDialog):
         assignment_form.addRow("Assignment ID:", self.assignment_id_edit)
 
         self.question_combo = QComboBox()
-        self.question_combo.addItem("All questions", None)
-        for qid in self.initial_question_ids:
-            self.question_combo.addItem(qid, qid)
-        if not self.initial_question_ids:
-            self.question_combo.setItemText(0, "All available questions")
+        self._set_question_options(
+            self.initial_question_ids,
+            preserve_selection=False,
+        )
         assignment_form.addRow("Questions:", self.question_combo)
         config_layout.addWidget(assignment_group, 1)
 
@@ -365,12 +412,17 @@ class SimilarityReviewDialog(QDialog):
         self._active_path_source = source_type
         if source_type in self._source_paths:
             self.source_path_edit.setText(self._source_paths.get(source_type, ""))
+        self._reset_question_options()
         self._update_source_controls()
 
     def _remember_source_path(self):
         source_type = self.selected_source_type()
         if source_type in self._source_paths:
-            self._source_paths[source_type] = self.source_path_edit.text().strip()
+            new_path = self.source_path_edit.text().strip()
+            old_path = self._source_paths.get(source_type, "")
+            self._source_paths[source_type] = new_path
+            if new_path != old_path:
+                self._reset_question_options()
 
     def _update_source_controls(self):
         source_type = self.selected_source_type()
@@ -419,12 +471,18 @@ class SimilarityReviewDialog(QDialog):
 
     def _collect_source(self):
         source_type = self.selected_source_type()
-        question_ids = self.requested_question_ids()
+
+        # Always collect the complete source question set. A single-question UI
+        # selection is applied only when generating the report. Otherwise a
+        # Q3-only rerun would shrink the source itself to Q3 and remove Q1/Q2/Q4
+        # from the selector.
+        source_question_ids = list(self.initial_question_ids) or None
+
         if source_type == SOURCE_LOADED:
             return collect_similarity_source(
                 SOURCE_LOADED,
                 loaded_submissions=self.loaded_submissions,
-                question_ids=question_ids,
+                question_ids=source_question_ids,
             )
 
         path = self.source_path_edit.text().strip()
@@ -433,7 +491,7 @@ class SimilarityReviewDialog(QDialog):
         return collect_similarity_source(
             source_type,
             path=path,
-            question_ids=question_ids,
+            question_ids=source_question_ids,
         )
 
     def run_review(self):
@@ -458,6 +516,8 @@ class SimilarityReviewDialog(QDialog):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             source = self._collect_source()
+            self._refresh_question_options(source.question_ids)
+
             if len(source.submissions) < 2:
                 self.source_result = source
                 self.report = None
