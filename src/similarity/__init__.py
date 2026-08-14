@@ -79,4 +79,28 @@ __all__ = [
     "tokenize_for_similarity",
     "make_word_shingles",
     "jaccard_similarity",
+    "SOURCE_LOADED",
+    "SOURCE_SUBMISSIONS_FOLDER",
+    "SOURCE_ASSESSMENT_FOLDER",
+    "VALID_SOURCE_TYPES",
+    "SimilaritySourceResult",
+    "infer_similarity_question_ids",
+    "collect_loaded_similarity_submissions",
+    "collect_similarity_submissions_folder",
+    "collect_similarity_assessment_folder",
+    "collect_similarity_source",
+
 ]
+
+from .sources import (
+    SOURCE_ASSESSMENT_FOLDER,
+    SOURCE_LOADED,
+    SOURCE_SUBMISSIONS_FOLDER,
+    VALID_SOURCE_TYPES,
+    SimilaritySourceResult,
+    collect_loaded_similarity_submissions,
+    collect_similarity_assessment_folder,
+    collect_similarity_source,
+    collect_similarity_submissions_folder,
+    infer_similarity_question_ids,
+)
