@@ -7,8 +7,10 @@ misconduct-classification logic.
 from .compare import (
     DEFAULT_THRESHOLDS,
     SHORT_ANSWER_TOKEN_THRESHOLD,
+    VALID_SIMILARITY_METHODS,
     compare_submissions,
     compute_question_ngram_similarity,
+    resolve_similarity_methods,
     resolve_similarity_thresholds,
 )
 from .export import (
@@ -53,8 +55,10 @@ __all__ = [
     "SimilarityReport",
     "DEFAULT_THRESHOLDS",
     "SHORT_ANSWER_TOKEN_THRESHOLD",
+    "VALID_SIMILARITY_METHODS",
     "compare_submissions",
     "compute_question_ngram_similarity",
+    "resolve_similarity_methods",
     "resolve_similarity_thresholds",
     "DEFAULT_METHODS",
     "generate_similarity_report",

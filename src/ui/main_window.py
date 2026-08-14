@@ -22,6 +22,7 @@ from src.ui.dialogs.abet_dialogs import (
     ABETMappingDialog, ABETReportDialog, SemesterABETReportDialog,
 )
 from src.ui.dialogs.master_evidence_export_dialog import MasterEvidenceExportDialog
+from src.ui.dialogs.similarity_dialog import SimilarityReviewDialog
 
 from PyQt5.QtWidgets import (
     QAction, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -330,6 +331,24 @@ class RubricGrader(QMainWindow):
         self.reports_menu_button.setPopupMode(QToolButton.InstantPopup)
         self.reports_menu_button.setMenu(reports_menu)
         toolbar_layout.addWidget(self.reports_menu_button)
+
+        tools_menu = QMenu(self)
+        self.similarity_review_action = QAction(
+            qta.icon('fa5s.search'), "Submission Similarity Review", self
+        )
+        self.similarity_review_action.setToolTip(
+            "Compare student submissions using deterministic, explainable similarity signals"
+        )
+        self.similarity_review_action.triggered.connect(self.show_similarity_review)
+        tools_menu.addAction(self.similarity_review_action)
+
+        self.tools_menu_button = QToolButton()
+        self.tools_menu_button.setText("Tools")
+        self.tools_menu_button.setIcon(qta.icon('fa5s.tools'))
+        self.tools_menu_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.tools_menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.tools_menu_button.setMenu(tools_menu)
+        toolbar_layout.addWidget(self.tools_menu_button)
 
         settings_menu = QMenu(self)
         self.config_btn = QAction(qta.icon('fa5s.sliders-h'), "Grading Configuration", self)
@@ -3051,6 +3070,35 @@ class RubricGrader(QMainWindow):
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Failed to open Semester ABET Report dialog:\n{str(e)}"
+            )
+
+    def show_similarity_review(self):
+        """Open the v2.3.0 deterministic Submission Similarity Review UI."""
+        try:
+            rubric = self.rubric_data or {}
+            assignment_id = (
+                rubric.get("assignment_id")
+                or rubric.get("assessment_id")
+                or ""
+            )
+            dialog = SimilarityReviewDialog(
+                self,
+                assignment_id=str(assignment_id),
+                question_ids=self._submission_question_ids(),
+                loaded_submissions=self.submission_controller.submissions,
+                submissions_dir=(
+                    self.submissions_dir
+                    or self.submission_controller.submissions_dir
+                    or ""
+                ),
+                assessments_dir=self.assessments_dir or "",
+            )
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open Submission Similarity Review:\n{str(e)}",
             )
 
     def show_master_abet_evidence_export(self):

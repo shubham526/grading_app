@@ -241,7 +241,19 @@ def render_similarity_report_html(
             else {}
         )
 
-        for question_id, question in pair.question_similarities.items():
+        detail_question_ids = list(pair.question_similarities)
+        if not detail_question_ids and pair.most_similar_question:
+            detail_question_ids = [pair.most_similar_question]
+        if not detail_question_ids and (answers_a or answers_b):
+            detail_question_ids = sorted(
+                question_id
+                for question_id in (set(answers_a) & set(answers_b))
+                if question_id and question_id != "FULL_SUBMISSION"
+            )
+
+        for question_id in detail_question_ids:
+            question = pair.question_similarities.get(question_id)
+            shared_spans = list(question.shared_spans or []) if question is not None else []
             if answers_a or answers_b:
                 comparison = render_side_by_side_html(
                     pair.student_a,
@@ -249,13 +261,13 @@ def render_similarity_report_html(
                     question_id,
                     answers_a.get(question_id, ""),
                     answers_b.get(question_id, ""),
-                    question.shared_spans,
+                    shared_spans,
                 )
             else:
-                if question.shared_spans:
+                if shared_spans:
                     shared_items = "".join(
                         f"<li><code>{escape(str(span.get('text', '')))}</code></li>"
-                        for span in question.shared_spans
+                        for span in shared_spans
                     )
                 else:
                     shared_items = "<li><em>No shared phrases identified.</em></li>"
@@ -268,16 +280,21 @@ def render_similarity_report_html(
                     "</section>"
                 )
 
-            question_sections.append(
-                comparison
-                + (
+            if question is not None:
+                score_line = (
                     '<p class="question-score">'
                     f"<strong>N-gram Jaccard:</strong> {question.ngram_jaccard:.4f} "
                     f"&nbsp; <strong>Question flag:</strong> "
                     f"{escape(question.flag_level)}"
                     "</p>"
                 )
-            )
+            else:
+                score_line = (
+                    '<p class="question-score"><em>N-gram overlap was not selected '
+                    'for this review.</em></p>'
+                )
+
+            question_sections.append(comparison + score_line)
 
         notes = (
             "<ul>"

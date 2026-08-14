@@ -6,15 +6,16 @@ from datetime import datetime, timezone
 from itertools import combinations
 from typing import Any, Mapping, Sequence
 
-from .compare import compare_submissions, resolve_similarity_thresholds
+from .compare import (
+    VALID_SIMILARITY_METHODS,
+    compare_submissions,
+    resolve_similarity_methods,
+    resolve_similarity_thresholds,
+)
 from .models import FLAG_RANK, PairSimilarity, SimilarityReport
 
 
-DEFAULT_METHODS = [
-    "exact_file_hash",
-    "normalized_text_hash",
-    "ngram_jaccard",
-]
+DEFAULT_METHODS = list(VALID_SIMILARITY_METHODS)
 
 
 def _utc_timestamp() -> str:
@@ -67,6 +68,7 @@ def generate_similarity_report(
     assignment_id: str,
     question_ids: Sequence[str],
     thresholds: Mapping[str, Any] | None = None,
+    methods: Sequence[str] | None = None,
 ) -> SimilarityReport:
     """Compare all unique student pairs for one assignment.
 
@@ -82,6 +84,9 @@ def generate_similarity_report(
         Matching question IDs to compare. Q1 is only compared with Q1, etc.
     thresholds:
         Optional partial/full override of the default n-gram thresholds.
+    methods:
+        Selected deterministic methods. Defaults to exact file hash, normalized
+        text hash, and question-level n-gram Jaccard.
 
     Returns
     -------
@@ -102,6 +107,7 @@ def generate_similarity_report(
         raise ValueError("assignment_id must be non-empty.")
 
     resolved_thresholds = resolve_similarity_thresholds(thresholds)
+    selected_methods = resolve_similarity_methods(methods)
 
     ordered_question_ids: list[str] = []
     seen_questions: set[str] = set()
@@ -138,6 +144,7 @@ def generate_similarity_report(
                 submission_b,
                 ordered_question_ids,
                 thresholds=resolved_thresholds,
+                methods=selected_methods,
             )
         except (ValueError, TypeError, FileNotFoundError, OSError) as exc:
             _append_warning_once(
@@ -160,7 +167,7 @@ def generate_similarity_report(
         report_type="submission_similarity",
         assignment_id=assignment_id,
         generated_at=_utc_timestamp(),
-        methods=list(DEFAULT_METHODS),
+        methods=list(selected_methods),
         students=students,
         pairs=pairs,
         thresholds=resolved_thresholds,

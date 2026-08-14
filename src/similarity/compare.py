@@ -31,6 +31,13 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
 
 SHORT_ANSWER_TOKEN_THRESHOLD = 30
 
+VALID_SIMILARITY_METHODS = (
+    "exact_file_hash",
+    "normalized_text_hash",
+    "ngram_jaccard",
+)
+
+
 # Exact-file comparison is restricted to source-like student artifacts.  In
 # particular, ``compiled_pdf`` is derived evidence for LaTeX submissions and is
 # not used as a byte-for-byte student-source signal.
@@ -146,6 +153,31 @@ def resolve_similarity_thresholds(
             "Similarity thresholds must satisfy low <= medium <= high <= exact."
         )
     return merged
+
+
+def resolve_similarity_methods(
+    methods: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Validate and de-duplicate selected deterministic similarity methods."""
+
+    selected = VALID_SIMILARITY_METHODS if methods is None else tuple(methods)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in selected:
+        method = str(raw or "").strip()
+        if not method:
+            continue
+        if method not in VALID_SIMILARITY_METHODS:
+            raise ValueError(
+                f"Unsupported similarity method {method!r}; expected one of: "
+                + ", ".join(VALID_SIMILARITY_METHODS)
+            )
+        if method not in seen:
+            seen.add(method)
+            cleaned.append(method)
+    if not cleaned:
+        raise ValueError("At least one similarity method is required.")
+    return tuple(cleaned)
 
 
 def _flag_for_ngram(score: float, thresholds: Mapping[str, float]) -> str:
@@ -332,6 +364,7 @@ def compare_submissions(
     question_ids: Sequence[str],
     thresholds: Mapping[str, Any] | None = None,
     *,
+    methods: Sequence[str] | None = None,
     n: int = 5,
     short_answer_token_threshold: int = SHORT_ANSWER_TOKEN_THRESHOLD,
 ) -> PairSimilarity:
@@ -348,6 +381,7 @@ def compare_submissions(
         raise ValueError("short_answer_token_threshold must be positive")
 
     resolved_thresholds = resolve_similarity_thresholds(thresholds)
+    selected_methods = resolve_similarity_methods(methods)
     view_a = _submission_view(student_a)
     view_b = _submission_view(student_b)
 
@@ -365,31 +399,36 @@ def compare_submissions(
     question_results: dict[str, QuestionSimilarity] = {}
     notes: list[str] = []
 
-    for question_id in ordered_question_ids:
-        if question_id not in view_a.answers or question_id not in view_b.answers:
-            notes.append(f"missing_comparable_question:{question_id}")
-            continue
+    if "ngram_jaccard" in selected_methods:
+        for question_id in ordered_question_ids:
+            if question_id not in view_a.answers or question_id not in view_b.answers:
+                notes.append(f"missing_comparable_question:{question_id}")
+                continue
 
-        result = _question_similarity(
-            view_a.answers.get(question_id, ""),
-            view_b.answers.get(question_id, ""),
-            question_id,
-            n,
-            resolved_thresholds,
-            short_answer_token_threshold,
-        )
-        question_results[question_id] = result
-        for warning in result.warnings:
-            if warning not in notes:
-                notes.append(warning)
+            result = _question_similarity(
+                view_a.answers.get(question_id, ""),
+                view_b.answers.get(question_id, ""),
+                question_id,
+                n,
+                resolved_thresholds,
+                short_answer_token_threshold,
+            )
+            question_results[question_id] = result
+            for warning in result.warnings:
+                if warning not in notes:
+                    notes.append(warning)
 
-    exact_signal = _find_exact_file_match(view_a, view_b)
+    exact_signal = (
+        _find_exact_file_match(view_a, view_b)
+        if "exact_file_hash" in selected_methods
+        else None
+    )
     exact_file_match = exact_signal is not None
 
-    normalized_matches = _find_normalized_text_matches(
-        view_a,
-        view_b,
-        ordered_question_ids,
+    normalized_matches = (
+        _find_normalized_text_matches(view_a, view_b, ordered_question_ids)
+        if "normalized_text_hash" in selected_methods
+        else []
     )
     normalized_text_match = bool(normalized_matches)
 
@@ -410,10 +449,11 @@ def compare_submissions(
         )
         signals["normalized_text_hash"] = normalized_signal.to_dict()
 
-    signals["ngram_jaccard"] = {
-        question_id: result.ngram_jaccard
-        for question_id, result in question_results.items()
-    }
+    if "ngram_jaccard" in selected_methods:
+        signals["ngram_jaccard"] = {
+            question_id: result.ngram_jaccard
+            for question_id, result in question_results.items()
+        }
 
     strongest_question: str | None = None
     strongest_score = 0.0
@@ -451,7 +491,12 @@ def compare_submissions(
         if question_matches:
             strongest_question = question_matches[0]
 
-    if not question_results and not normalized_text_match and not exact_file_match:
+    if (
+        ("ngram_jaccard" in selected_methods or "normalized_text_hash" in selected_methods)
+        and not question_results
+        and not normalized_text_match
+        and not exact_file_match
+    ):
         notes.append("no_comparable_text")
 
     return PairSimilarity(
@@ -471,7 +516,9 @@ def compare_submissions(
 __all__ = [
     "DEFAULT_THRESHOLDS",
     "SHORT_ANSWER_TOKEN_THRESHOLD",
+    "VALID_SIMILARITY_METHODS",
     "resolve_similarity_thresholds",
+    "resolve_similarity_methods",
     "compare_submissions",
     "compute_question_ngram_similarity",
 ]
