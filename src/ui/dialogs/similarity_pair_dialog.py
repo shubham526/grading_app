@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QLabel,
     QListWidget,
     QPlainTextEdit,
-    QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -120,7 +119,17 @@ class PairSimilarityDetailDialog(QDialog):
         )
         layout.addWidget(disclaimer)
 
+        # The review body is a vertical splitter so the instructor can decide
+        # how much space to devote to question evidence, pair signals, and
+        # warnings.  The Close button remains outside the splitter and therefore
+        # cannot be pushed off-screen by resizing the evidence panes.
+        self.main_splitter = QSplitter(Qt.Vertical)
+        self.main_splitter.setObjectName("pairDetailMainSplitter")
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(8)
+
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("pairDetailQuestionTabs")
         if self.question_ids:
             for question_id in self.question_ids:
                 self.tabs.addTab(
@@ -135,28 +144,45 @@ class PairSimilarityDetailDialog(QDialog):
             empty.setWordWrap(True)
             empty.setAlignment(Qt.AlignCenter)
             self.tabs.addTab(empty, "Pair signals")
-        layout.addWidget(self.tabs, 1)
+        self.main_splitter.addWidget(self.tabs)
 
         signal_frame = QFrame()
+        signal_frame.setObjectName("pairSignalPane")
         signal_layout = QVBoxLayout(signal_frame)
         signal_layout.setContentsMargins(0, 0, 0, 0)
+        signal_layout.setSpacing(6)
         signal_layout.addWidget(QLabel("<b>Pair signals</b>"))
         self.signal_text = QPlainTextEdit()
+        self.signal_text.setObjectName("pairSignalText")
         self.signal_text.setReadOnly(True)
-        self.signal_text.setMaximumHeight(130)
+        self.signal_text.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.signal_text.setMinimumHeight(80)
         self.signal_text.setPlainText(self._signal_summary())
-        signal_layout.addWidget(self.signal_text)
-        layout.addWidget(signal_frame)
+        signal_layout.addWidget(self.signal_text, 1)
+        self.main_splitter.addWidget(signal_frame)
 
-        warnings = QLabel("<b>Warnings / notes</b>")
-        layout.addWidget(warnings)
+        warning_frame = QFrame()
+        warning_frame.setObjectName("pairWarningPane")
+        warning_layout = QVBoxLayout(warning_frame)
+        warning_layout.setContentsMargins(0, 0, 0, 0)
+        warning_layout.setSpacing(6)
+        warning_layout.addWidget(QLabel("<b>Warnings / notes</b>"))
         self.warning_list = QListWidget()
-        self.warning_list.setMaximumHeight(100)
+        self.warning_list.setObjectName("pairWarningList")
+        self.warning_list.setMinimumHeight(65)
+        self.warning_list.setWordWrap(True)
         if self.pair.notes:
             self.warning_list.addItems(self.pair.notes)
         else:
             self.warning_list.addItem("No pair warnings.")
-        layout.addWidget(self.warning_list)
+        warning_layout.addWidget(self.warning_list, 1)
+        self.main_splitter.addWidget(warning_frame)
+
+        self.main_splitter.setStretchFactor(0, 7)
+        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter.setStretchFactor(2, 1)
+        self.main_splitter.setSizes([520, 150, 90])
+        layout.addWidget(self.main_splitter, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
@@ -167,9 +193,30 @@ class PairSimilarityDetailDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
 
         question_result = self.pair.question_similarities.get(question_id)
+
+        answers_a = _answers_from_submission(self.submissions.get(self.pair.student_a))
+        answers_b = _answers_from_submission(self.submissions.get(self.pair.student_b))
+        answer_a = answers_a.get(question_id, "")
+        answer_b = answers_b.get(question_id, "")
+
+        # Each question tab has its own vertical splitter.  Its upper pane owns
+        # the question score + horizontally resizable answers; its lower pane
+        # owns shared phrases.  This keeps the shared-phrase list from forcing
+        # pair signals and warnings out of view.
+        question_splitter = QSplitter(Qt.Vertical)
+        question_splitter.setObjectName("pairQuestionVerticalSplitter")
+        question_splitter.setChildrenCollapsible(False)
+        question_splitter.setHandleWidth(8)
+
+        answer_section = QFrame()
+        answer_section.setObjectName("pairAnswerSection")
+        answer_layout = QVBoxLayout(answer_section)
+        answer_layout.setContentsMargins(0, 0, 0, 0)
+        answer_layout.setSpacing(8)
+
         if question_result is not None:
             score_text = (
                 f"N-gram Jaccard: <b>{question_result.ngram_jaccard:.4f}</b> &nbsp;&nbsp; "
@@ -184,29 +231,36 @@ class PairSimilarityDetailDialog(QDialog):
         score_label = QLabel(score_text)
         score_label.setTextFormat(Qt.RichText)
         score_label.setWordWrap(True)
-        layout.addWidget(score_label)
+        answer_layout.addWidget(score_label)
 
-        answers_a = _answers_from_submission(self.submissions.get(self.pair.student_a))
-        answers_b = _answers_from_submission(self.submissions.get(self.pair.student_b))
-        answer_a = answers_a.get(question_id, "")
-        answer_b = answers_b.get(question_id, "")
+        answer_splitter = QSplitter(Qt.Horizontal)
+        answer_splitter.setObjectName("pairAnswerHorizontalSplitter")
+        answer_splitter.setChildrenCollapsible(False)
+        answer_splitter.setHandleWidth(8)
+        answer_splitter.addWidget(self._answer_panel(self.pair.student_a, answer_a))
+        answer_splitter.addWidget(self._answer_panel(self.pair.student_b, answer_b))
+        answer_splitter.setStretchFactor(0, 1)
+        answer_splitter.setStretchFactor(1, 1)
+        answer_splitter.setSizes([1, 1])
+        answer_layout.addWidget(answer_splitter, 1)
+        question_splitter.addWidget(answer_section)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self._answer_panel(self.pair.student_a, answer_a))
-        splitter.addWidget(self._answer_panel(self.pair.student_b, answer_b))
-        splitter.setSizes([1, 1])
-        layout.addWidget(splitter, 1)
+        shared_frame = QFrame()
+        shared_frame.setObjectName("pairSharedPhrasePane")
+        shared_layout = QVBoxLayout(shared_frame)
+        shared_layout.setContentsMargins(0, 0, 0, 0)
+        shared_layout.setSpacing(6)
+        shared_layout.addWidget(QLabel("<b>Shared phrases</b>"))
 
-        shared_label = QLabel("<b>Shared phrases</b>")
-        layout.addWidget(shared_label)
         self_shared = (
             list(question_result.shared_spans or [])
             if question_result is not None
             else find_shared_spans(answer_a, answer_b)
         )
         shared_list = QListWidget()
-        shared_list.setMaximumHeight(150)
+        shared_list.setObjectName("pairSharedPhraseList")
+        shared_list.setMinimumHeight(80)
+        shared_list.setWordWrap(True)
         if self_shared:
             for span in self_shared:
                 shared_list.addItem(
@@ -215,15 +269,21 @@ class PairSimilarityDetailDialog(QDialog):
                 )
         else:
             shared_list.addItem("No shared phrase spans were identified.")
-        layout.addWidget(shared_list)
+        shared_layout.addWidget(shared_list, 1)
 
         if question_result is not None and question_result.warnings:
             warning_label = QLabel(
                 "Warnings: " + "; ".join(question_result.warnings)
             )
             warning_label.setWordWrap(True)
-            layout.addWidget(warning_label)
+            shared_layout.addWidget(warning_label)
 
+        question_splitter.addWidget(shared_frame)
+        question_splitter.setStretchFactor(0, 4)
+        question_splitter.setStretchFactor(1, 2)
+        question_splitter.setSizes([360, 150])
+
+        layout.addWidget(question_splitter, 1)
         return widget
 
     @staticmethod
@@ -241,28 +301,53 @@ class PairSimilarityDetailDialog(QDialog):
         return panel
 
     def _signal_summary(self) -> str:
-        lines = [
-            f"exact_file_match: {self.pair.exact_file_match}",
-            f"normalized_text_match: {self.pair.normalized_text_match}",
-        ]
-        ngram = self.pair.signals.get("ngram_jaccard") if isinstance(self.pair.signals, dict) else None
-        if isinstance(ngram, dict):
+        signals = self.pair.signals if isinstance(self.pair.signals, dict) else {}
+        lines: list[str] = []
+
+        exact = signals.get("exact_file_hash")
+        exact_details = exact.get("details") if isinstance(exact, dict) else {}
+        exact_details = exact_details if isinstance(exact_details, dict) else {}
+        lines.extend(
+            [
+                "Exact file hash",
+                f"  Match: {'Yes' if self.pair.exact_file_match else 'No'}",
+            ]
+        )
+        if exact_details:
+            file_type = exact_details.get("matching_file_type") or "—"
+            digest = exact_details.get("hash") or "—"
+            lines.append(f"  File type: {file_type}")
+            lines.append(f"  SHA256: {digest}")
+
+        lines.append("")
+        normalized = signals.get("normalized_text_hash")
+        normalized_details = (
+            normalized.get("details") if isinstance(normalized, dict) else {}
+        )
+        normalized_details = (
+            normalized_details if isinstance(normalized_details, dict) else {}
+        )
+        lines.extend(
+            [
+                "Normalized text hash",
+                f"  Match: {'Yes' if self.pair.normalized_text_match else 'No'}",
+            ]
+        )
+        matching_questions = normalized_details.get("matching_questions") or []
+        if matching_questions:
+            lines.append("  Matching questions: " + ", ".join(matching_questions))
+        if normalized_details.get("assignment_level_fallback"):
+            lines.append("  Assignment-level fallback: Yes")
+
+        lines.append("")
+        lines.append("N-gram overlap")
+        ngram = signals.get("ngram_jaccard")
+        if isinstance(ngram, dict) and ngram:
             for question_id, value in ngram.items():
-                lines.append(f"ngram_jaccard[{question_id}]: {float(value):.4f}")
-        exact = self.pair.signals.get("exact_file_hash") if isinstance(self.pair.signals, dict) else None
-        if isinstance(exact, dict):
-            details = exact.get("details") or {}
-            lines.append(
-                "exact_file_hash: "
-                f"type={details.get('matching_file_type', '')}, hash={details.get('hash', '')}"
-            )
-        normalized = self.pair.signals.get("normalized_text_hash") if isinstance(self.pair.signals, dict) else None
-        if isinstance(normalized, dict):
-            details = normalized.get("details") or {}
-            lines.append(
-                "normalized_text_hash: matching_questions="
-                + ", ".join(details.get("matching_questions") or [])
-            )
+                lines.append(f"  {question_id}: {float(value):.4f}")
+        else:
+            lines.append("  Not computed under the selected methods.")
+
         return "\n".join(lines)
 
 

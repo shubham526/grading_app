@@ -39,11 +39,27 @@ class TestSimilarityUiWiringWithoutQt(unittest.TestCase):
         self.assertIn("Shared phrases", source)
         self.assertIn("academic misconduct", source)
 
+    def test_pair_detail_uses_nested_resizable_splitters(self):
+        source = PAIR_DIALOG.read_text(encoding="utf-8")
+        self.assertIn('setObjectName("pairDetailMainSplitter")', source)
+        self.assertIn('setObjectName("pairQuestionVerticalSplitter")', source)
+        self.assertIn('setObjectName("pairAnswerHorizontalSplitter")', source)
+        self.assertNotIn("self.signal_text.setMaximumHeight", source)
+        self.assertNotIn("self.warning_list.setMaximumHeight", source)
+        self.assertNotIn("shared_list.setMaximumHeight", source)
+
+    def test_pair_signal_summary_is_instructor_readable(self):
+        source = PAIR_DIALOG.read_text(encoding="utf-8")
+        self.assertIn('"Exact file hash"', source)
+        self.assertIn('"Normalized text hash"', source)
+        self.assertIn('"N-gram overlap"', source)
+        self.assertIn('"  SHA256: ', source)
+
 
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PyQt5.QtCore import Qt
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QSplitter
 
     from src.similarity.models import PairSimilarity, QuestionSimilarity
     from src.ui.dialogs.similarity_dialog import SimilarityReviewDialog
@@ -156,6 +172,78 @@ class TestSimilarityReviewDialog(unittest.TestCase):
         self.assertEqual(detail.tabs.count(), 1)
         self.assertEqual(detail.tabs.tabText(0), "Q1")
         self.assertTrue(detail.isSizeGripEnabled())
+
+        main_splitter = detail.findChild(QSplitter, "pairDetailMainSplitter")
+        self.assertIsNotNone(main_splitter)
+        self.assertEqual(main_splitter.orientation(), Qt.Vertical)
+        self.assertEqual(main_splitter.count(), 3)
+
+        question_splitter = detail.findChild(QSplitter, "pairQuestionVerticalSplitter")
+        self.assertIsNotNone(question_splitter)
+        self.assertEqual(question_splitter.orientation(), Qt.Vertical)
+        self.assertEqual(question_splitter.count(), 2)
+
+        answer_splitter = detail.findChild(QSplitter, "pairAnswerHorizontalSplitter")
+        self.assertIsNotNone(answer_splitter)
+        self.assertEqual(answer_splitter.orientation(), Qt.Horizontal)
+        self.assertEqual(answer_splitter.count(), 2)
+
+        self.assertGreater(detail.signal_text.maximumHeight(), 1000000)
+        self.assertGreater(detail.warning_list.maximumHeight(), 1000000)
+        detail.close()
+
+    def test_pair_detail_formats_signals_as_readable_sections(self):
+        pair = PairSimilarity(
+            student_a="alice",
+            student_b="bob",
+            overall_score=1.0,
+            flag_level="exact",
+            most_similar_question="Q1",
+            exact_file_match=True,
+            normalized_text_match=True,
+            question_similarities={
+                "Q1": QuestionSimilarity(
+                    question_id="Q1",
+                    ngram_jaccard=1.0,
+                    shared_shingle_count=10,
+                    total_shingle_count=10,
+                    flag_level="exact",
+                )
+            },
+            signals={
+                "exact_file_hash": {
+                    "method": "exact_file_hash",
+                    "score": 1.0,
+                    "details": {
+                        "matching_file_type": "latex",
+                        "hash": "abc123",
+                    },
+                },
+                "normalized_text_hash": {
+                    "method": "normalized_text_hash",
+                    "score": 1.0,
+                    "details": {"matching_questions": ["Q1"]},
+                },
+                "ngram_jaccard": {"Q1": 1.0},
+            },
+        )
+        detail = PairSimilarityDetailDialog(
+            pair=pair,
+            submissions={
+                "alice": self._submission("alice", "answer a"),
+                "bob": self._submission("bob", "answer b"),
+            },
+            question_ids=["Q1"],
+        )
+        summary = detail.signal_text.toPlainText()
+        self.assertIn("Exact file hash", summary)
+        self.assertIn("Match: Yes", summary)
+        self.assertIn("File type: latex", summary)
+        self.assertIn("SHA256: abc123", summary)
+        self.assertIn("Normalized text hash", summary)
+        self.assertIn("Matching questions: Q1", summary)
+        self.assertIn("N-gram overlap", summary)
+        self.assertIn("Q1: 1.0000", summary)
         detail.close()
 
 
