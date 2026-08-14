@@ -5,12 +5,14 @@ import unittest
 from pathlib import Path
 
 from src.similarity.export import (
+    CLUSTERS_FILENAME,
     CSV_COLUMNS,
     CSV_FILENAME,
     DISCLAIMER,
     HTML_FILENAME,
     JSON_FILENAME,
     MATRIX_FILENAME,
+    TRENDS_FILENAME,
     export_similarity_html,
     export_similarity_json,
     export_similarity_matrix_csv,
@@ -202,6 +204,8 @@ class TestCombinedExport(unittest.TestCase):
             self.assertEqual(results["json"].name, JSON_FILENAME)
             self.assertEqual(results["csv"].name, CSV_FILENAME)
             self.assertEqual(results["matrix_csv"].name, MATRIX_FILENAME)
+            self.assertEqual(results["clusters_csv"].name, CLUSTERS_FILENAME)
+            self.assertEqual(results["trends_csv"].name, TRENDS_FILENAME)
             self.assertEqual(results["html"].name, HTML_FILENAME)
             for path in results.values():
                 self.assertIsNotNone(path)
@@ -218,6 +222,8 @@ class TestCombinedExport(unittest.TestCase):
             self.assertTrue(results["json"].is_file())
             self.assertIsNone(results["csv"])
             self.assertIsNone(results["matrix_csv"])
+            self.assertIsNone(results["clusters_csv"])
+            self.assertIsNone(results["trends_csv"])
             self.assertIsNone(results["html"])
             self.assertEqual(
                 {path.name for path in Path(tmp).iterdir()},
@@ -235,6 +241,8 @@ class TestCombinedExport(unittest.TestCase):
             )
             self.assertTrue(results["csv"].is_file())
             self.assertIsNone(results["matrix_csv"])
+            self.assertTrue(results["clusters_csv"].is_file())
+            self.assertTrue(results["trends_csv"].is_file())
             self.assertFalse((Path(tmp) / MATRIX_FILENAME).exists())
 
     def test_unknown_format_is_rejected(self):

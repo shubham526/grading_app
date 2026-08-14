@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .highlight import render_side_by_side_html
-from .models import FLAG_RANK, PairSimilarity, SimilarityReport
+from .models import PairSimilarity, SimilarityReport
 
 
 DISCLAIMER = (
@@ -18,10 +18,18 @@ DISCLAIMER = (
     "They do not determine whether academic misconduct occurred."
 )
 
+EMBEDDING_DISCLAIMER = (
+    "Embedding similarity is a semantic signal and may be high for independently "
+    "written correct solutions to the same problem. Review the underlying "
+    "submissions before drawing conclusions."
+)
+
 JSON_FILENAME = "similarity_report.json"
 CSV_FILENAME = "similarity_pairs.csv"
 MATRIX_FILENAME = "similarity_matrix.csv"
 HTML_FILENAME = "similarity_report.html"
+CLUSTERS_FILENAME = "similarity_clusters.csv"
+TRENDS_FILENAME = "similarity_trends.csv"
 
 VALID_EXPORT_FORMATS = ("json", "csv", "html")
 
@@ -34,7 +42,34 @@ CSV_COLUMNS = [
     "Exact File Match",
     "Normalized Text Match",
     "Max Ngram Similarity",
+    "Embedding Max",
+    "Pseudocode Max",
+    "Cluster",
+    "Trend Count",
+    "Student A Text Source",
+    "Student B Text Source",
+    "Student A Assistive Transcription",
+    "Student B Assistive Transcription",
     "Warnings",
+]
+
+CLUSTER_CSV_COLUMNS = [
+    "Cluster ID",
+    "Size",
+    "Students",
+    "Max Similarity",
+    "Questions",
+    "Signals",
+]
+
+TREND_CSV_COLUMNS = [
+    "Student A",
+    "Student B",
+    "Assignments Flagged",
+    "Count",
+    "Max Similarity",
+    "Questions",
+    "Signals",
 ]
 
 
@@ -65,7 +100,11 @@ def _max_ngram(pair: PairSimilarity | Mapping[str, Any]) -> float:
     return max(scores, default=0.0)
 
 
-def _pair_value(pair: PairSimilarity | Mapping[str, Any], key: str, default: Any = None) -> Any:
+def _pair_value(
+    pair: PairSimilarity | Mapping[str, Any],
+    key: str,
+    default: Any = None,
+) -> Any:
     if isinstance(pair, PairSimilarity):
         return getattr(pair, key, default)
     return pair.get(key, default)
@@ -96,6 +135,91 @@ def _submission_answers(submission: Any) -> dict[str, str]:
     }
 
 
+def _canonical_pair(student_a: str, student_b: str) -> tuple[str, str]:
+    return tuple(sorted((str(student_a), str(student_b))))
+
+
+def _trend_for_pair(
+    report: SimilarityReport,
+    pair: PairSimilarity,
+) -> Mapping[str, Any] | None:
+    target = _canonical_pair(pair.student_a, pair.student_b)
+    for trend in report.trends:
+        if not isinstance(trend, Mapping):
+            continue
+        student_a = str(trend.get("student_a") or "")
+        student_b = str(trend.get("student_b") or "")
+        if student_a and student_b and _canonical_pair(student_a, student_b) == target:
+            return trend
+    return None
+
+
+def _trend_count(report: SimilarityReport, pair: PairSimilarity) -> int:
+    trend = _trend_for_pair(report, pair)
+    if not trend:
+        return 0
+    try:
+        return int(trend.get("count", len(trend.get("assignments", []) or [])) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _provenance_for_student(
+    report: SimilarityReport,
+    pair: PairSimilarity,
+    student_id: str,
+) -> Mapping[str, Any]:
+    pair_provenance = pair.submission_provenance or {}
+    value = pair_provenance.get(student_id)
+    if isinstance(value, Mapping):
+        return value
+    report_value = (report.submission_provenance or {}).get(student_id)
+    return report_value if isinstance(report_value, Mapping) else {}
+
+
+def _analysis_text_source(provenance: Mapping[str, Any]) -> str:
+    return str(
+        provenance.get("analysis_text_source")
+        or provenance.get("assistive_text_source")
+        or provenance.get("source_used")
+        or ""
+    )
+
+
+def _uses_assistive_transcription(provenance: Mapping[str, Any]) -> bool:
+    return bool(provenance.get("uses_assistive_transcription", False))
+
+
+def _format_optional_score(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{float(value):.6f}"
+
+
+def _format_list(value: Any, separator: str = "; ") -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return separator.join(str(item) for item in value)
+    return str(value)
+
+
+def _format_trend_questions(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return _format_list(value)
+    chunks: list[str] = []
+    for assignment in sorted(value):
+        raw_questions = value[assignment]
+        if isinstance(raw_questions, (list, tuple, set)):
+            questions = ", ".join(str(qid) for qid in raw_questions)
+        else:
+            questions = str(raw_questions or "")
+        chunks.append(f"{assignment}: {questions}")
+    return "; ".join(chunks)
+
+
 def export_similarity_json(
     report: SimilarityReport | Mapping[str, Any],
     path: str | Path,
@@ -120,6 +244,8 @@ def export_similarity_pairs_csv(
         writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for pair in report.pairs:
+            provenance_a = _provenance_for_student(report, pair, pair.student_a)
+            provenance_b = _provenance_for_student(report, pair, pair.student_b)
             writer.writerow(
                 {
                     "Student A": pair.student_a,
@@ -130,6 +256,22 @@ def export_similarity_pairs_csv(
                     "Exact File Match": pair.exact_file_match,
                     "Normalized Text Match": pair.normalized_text_match,
                     "Max Ngram Similarity": _max_ngram(pair),
+                    "Embedding Max": _format_optional_score(
+                        pair.embedding_max_similarity
+                    ),
+                    "Pseudocode Max": _format_optional_score(
+                        pair.pseudocode_max_similarity
+                    ),
+                    "Cluster": "; ".join(pair.cluster_ids),
+                    "Trend Count": _trend_count(report, pair),
+                    "Student A Text Source": _analysis_text_source(provenance_a),
+                    "Student B Text Source": _analysis_text_source(provenance_b),
+                    "Student A Assistive Transcription": _uses_assistive_transcription(
+                        provenance_a
+                    ),
+                    "Student B Assistive Transcription": _uses_assistive_transcription(
+                        provenance_b
+                    ),
                     "Warnings": "; ".join(pair.notes),
                 }
             )
@@ -169,7 +311,71 @@ def export_similarity_matrix_csv(
     return output
 
 
-def _html_pair_summary_row(pair: PairSimilarity) -> str:
+def export_similarity_clusters_csv(
+    report: SimilarityReport,
+    path: str | Path,
+) -> Path:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with output.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CLUSTER_CSV_COLUMNS)
+        writer.writeheader()
+        for cluster in report.clusters:
+            if not isinstance(cluster, Mapping):
+                continue
+            writer.writerow(
+                {
+                    "Cluster ID": cluster.get("cluster_id", ""),
+                    "Size": cluster.get("size", ""),
+                    "Students": _format_list(cluster.get("students", [])),
+                    "Max Similarity": cluster.get("max_similarity", 0.0),
+                    "Questions": _format_list(cluster.get("questions", [])),
+                    "Signals": _format_list(cluster.get("signals", [])),
+                }
+            )
+    return output
+
+
+def export_similarity_trends_csv(
+    report: SimilarityReport,
+    path: str | Path,
+) -> Path:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with output.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=TREND_CSV_COLUMNS)
+        writer.writeheader()
+        for trend in report.trends:
+            if not isinstance(trend, Mapping):
+                continue
+            writer.writerow(
+                {
+                    "Student A": trend.get("student_a", ""),
+                    "Student B": trend.get("student_b", ""),
+                    "Assignments Flagged": _format_list(
+                        trend.get("assignments", [])
+                    ),
+                    "Count": trend.get(
+                        "count",
+                        len(trend.get("assignments", []) or []),
+                    ),
+                    "Max Similarity": trend.get("max_similarity", 0.0),
+                    "Questions": _format_trend_questions(
+                        trend.get("questions", {})
+                    ),
+                    "Signals": _format_list(trend.get("signals", [])),
+                }
+            )
+    return output
+
+
+def _html_optional_score(value: float | None) -> str:
+    return "—" if value is None else f"{float(value):.4f}"
+
+
+def _html_pair_summary_row(report: SimilarityReport, pair: PairSimilarity) -> str:
     return (
         "<tr>"
         f"<td>{escape(pair.student_a)}</td>"
@@ -180,15 +386,135 @@ def _html_pair_summary_row(pair: PairSimilarity) -> str:
         f"<td>{'yes' if pair.exact_file_match else 'no'}</td>"
         f"<td>{'yes' if pair.normalized_text_match else 'no'}</td>"
         f"<td>{_max_ngram(pair):.4f}</td>"
+        f"<td>{_html_optional_score(pair.embedding_max_similarity)}</td>"
+        f"<td>{_html_optional_score(pair.pseudocode_max_similarity)}</td>"
+        f"<td>{escape(', '.join(pair.cluster_ids) or '—')}</td>"
+        f"<td>{_trend_count(report, pair)}</td>"
         "</tr>"
     )
 
 
-def _question_shared_spans(pair: PairSimilarity, question_id: str) -> list[dict]:
-    question = pair.question_similarities.get(question_id)
-    if question is None:
-        return []
-    return list(question.shared_spans or [])
+def _html_cluster_rows(report: SimilarityReport) -> str:
+    if not report.clusters:
+        return (
+            '<tr><td colspan="6"><em>No similarity clusters were generated.</em>'
+            "</td></tr>"
+        )
+
+    rows: list[str] = []
+    for cluster in report.clusters:
+        if not isinstance(cluster, Mapping):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(cluster.get('cluster_id', '')))}</td>"
+            f"<td>{escape(str(cluster.get('size', '')))}</td>"
+            f"<td>{escape(_format_list(cluster.get('students', []), ', '))}</td>"
+            f"<td>{float(cluster.get('max_similarity', 0.0) or 0.0):.4f}</td>"
+            f"<td>{escape(_format_list(cluster.get('questions', []), ', '))}</td>"
+            f"<td>{escape(_format_list(cluster.get('signals', []), ', '))}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def _html_trend_rows(report: SimilarityReport) -> str:
+    if not report.trends:
+        return (
+            '<tr><td colspan="7"><em>No cross-assignment similarity trends were '
+            "provided for this report.</em></td></tr>"
+        )
+
+    rows: list[str] = []
+    for trend in report.trends:
+        if not isinstance(trend, Mapping):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(trend.get('student_a', '')))}</td>"
+            f"<td>{escape(str(trend.get('student_b', '')))}</td>"
+            f"<td>{escape(_format_list(trend.get('assignments', []), ', '))}</td>"
+            f"<td>{escape(str(trend.get('count', len(trend.get('assignments', []) or []))))}</td>"
+            f"<td>{float(trend.get('max_similarity', 0.0) or 0.0):.4f}</td>"
+            f"<td>{escape(_format_trend_questions(trend.get('questions', {})))}</td>"
+            f"<td>{escape(_format_list(trend.get('signals', []), ', '))}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def _html_provenance_panel(
+    report: SimilarityReport,
+    pair: PairSimilarity,
+    student_id: str,
+) -> str:
+    provenance = _provenance_for_student(report, pair, student_id)
+    if not provenance:
+        return (
+            f"<div class=\"provenance-panel\"><h5>{escape(student_id)}</h5>"
+            "<p><em>No submission provenance available.</em></p></div>"
+        )
+
+    assistive = _uses_assistive_transcription(provenance)
+    transcription = provenance.get("transcription")
+    transcription_text = ""
+    if isinstance(transcription, Mapping) and transcription:
+        provider = transcription.get("provider")
+        model = transcription.get("model")
+        details = [str(value) for value in (provider, model) if value]
+        if details:
+            transcription_text = (
+                "<li><strong>Transcription:</strong> "
+                + escape(" / ".join(details))
+                + "</li>"
+            )
+
+    warning = (
+        '<p class="assistive-warning"><strong>Note:</strong> Similarity analysis '
+        "used assistive machine transcription for this submission.</p>"
+        if assistive
+        else ""
+    )
+
+    return (
+        '<div class="provenance-panel">'
+        f"<h5>{escape(student_id)}</h5>"
+        "<ul>"
+        f"<li><strong>Source used:</strong> "
+        f"{escape(str(provenance.get('source_used') or ''))}</li>"
+        f"<li><strong>Authoritative source:</strong> "
+        f"{escape(str(provenance.get('authoritative_source') or ''))}</li>"
+        f"<li><strong>Text used for analysis:</strong> "
+        f"{escape(_analysis_text_source(provenance))}</li>"
+        f"<li><strong>Assistive transcription:</strong> "
+        f"{'yes' if assistive else 'no'}</li>"
+        f"{transcription_text}"
+        "</ul>"
+        f"{warning}"
+        "</div>"
+    )
+
+
+def _html_pair_signals(pair: PairSimilarity) -> str:
+    if not pair.signals:
+        return "<p><em>No pair signal details available.</em></p>"
+
+    items: list[str] = []
+    for method in sorted(pair.signals):
+        payload = pair.signals[method]
+        if isinstance(payload, Mapping):
+            score = payload.get("score")
+            score_text = (
+                f"{float(score):.4f}"
+                if isinstance(score, (int, float))
+                else escape(str(score or ""))
+            )
+        else:
+            score_text = escape(str(payload))
+        items.append(
+            f"<li><code>{escape(str(method))}</code>: {score_text}</li>"
+        )
+    return "<ul>" + "".join(items) + "</ul>"
 
 
 def render_similarity_report_html(
@@ -203,10 +529,12 @@ def render_similarity_report_html(
     ]
 
     if flagged_pairs:
-        summary_rows = "\n".join(_html_pair_summary_row(pair) for pair in flagged_pairs)
+        summary_rows = "\n".join(
+            _html_pair_summary_row(report, pair) for pair in flagged_pairs
+        )
     else:
         summary_rows = (
-            '<tr><td colspan="8"><em>No similarity pairs exceeded the configured '
+            '<tr><td colspan="12"><em>No similarity pairs exceeded the configured '
             "review thresholds.</em></td></tr>"
         )
 
@@ -218,6 +546,23 @@ def render_similarity_report_html(
         f"<li><code>{escape(str(method))}</code></li>"
         for method in report.methods
     )
+    advanced_method_items = "\n".join(
+        f"<li><code>{escape(str(method))}</code></li>"
+        for method in report.advanced_methods
+    )
+    if not advanced_method_items:
+        advanced_method_items = "<li><em>No advanced methods enabled.</em></li>"
+
+    embedding_notice = ""
+    if (
+        "embedding_cosine" in report.advanced_methods
+        or bool((report.embedding_config or {}).get("enabled"))
+    ):
+        embedding_notice = (
+            '<div class="semantic-warning"><strong>'
+            + escape(EMBEDDING_DISCLAIMER)
+            + "</strong></div>"
+        )
 
     detail_sections: list[str] = []
     for pair in detail_pairs:
@@ -229,7 +574,6 @@ def render_similarity_report_html(
             f"{escape(pair.most_similar_question or '')}</p>"
         )
 
-        question_sections: list[str] = []
         answers_a = (
             _submission_answers(submissions.get(pair.student_a))
             if submissions and pair.student_a in submissions
@@ -251,6 +595,7 @@ def render_similarity_report_html(
                 if question_id and question_id != "FULL_SUBMISSION"
             )
 
+        question_sections: list[str] = []
         for question_id in detail_question_ids:
             question = pair.question_similarities.get(question_id)
             shared_spans = list(question.shared_spans or []) if question is not None else []
@@ -270,10 +615,10 @@ def render_similarity_report_html(
                         for span in shared_spans
                     )
                 else:
-                    shared_items = "<li><em>No shared phrases identified.</em></li>"
+                    shared_items = "<li><em>No shared normalized phrases.</em></li>"
                 comparison = (
-                    f'<section class="question-comparison">'
-                    f"<h4>Question {escape(question_id)}</h4>"
+                    '<section class="question-comparison">'
+                    f"<h4>{escape(question_id)}</h4>"
                     "<p><em>Original answer text was not supplied to the exporter. "
                     "Shared normalized phrases from the similarity report are shown below.</em></p>"
                     f"<ul>{shared_items}</ul>"
@@ -281,17 +626,44 @@ def render_similarity_report_html(
                 )
 
             if question is not None:
+                advanced_bits: list[str] = []
+                if question.embedding_cosine is not None:
+                    advanced_bits.append(
+                        "<strong>Embedding:</strong> "
+                        f"{question.embedding_cosine:.4f}"
+                    )
+                if question.pseudocode_similarity is not None:
+                    advanced_bits.append(
+                        "<strong>Pseudocode:</strong> "
+                        f"{question.pseudocode_similarity:.4f}"
+                    )
+                if question.advanced_flags:
+                    advanced_bits.append(
+                        "<strong>Advanced flags:</strong> "
+                        + escape(", ".join(question.advanced_flags))
+                    )
+                if question.warnings:
+                    advanced_bits.append(
+                        "<strong>Question warnings:</strong> "
+                        + escape("; ".join(question.warnings))
+                    )
+
                 score_line = (
                     '<p class="question-score">'
                     f"<strong>N-gram Jaccard:</strong> {question.ngram_jaccard:.4f} "
-                    f"&nbsp; <strong>Question flag:</strong> "
+                    f"&nbsp; <strong>Deterministic question flag:</strong> "
                     f"{escape(question.flag_level)}"
-                    "</p>"
+                    + (
+                        "<br>" + " &nbsp; ".join(advanced_bits)
+                        if advanced_bits
+                        else ""
+                    )
+                    + "</p>"
                 )
             else:
                 score_line = (
                     '<p class="question-score"><em>N-gram overlap was not selected '
-                    'for this review.</em></p>'
+                    "for this review.</em></p>"
                 )
 
             question_sections.append(comparison + score_line)
@@ -304,10 +676,34 @@ def render_similarity_report_html(
             else "<p><em>No pair warnings.</em></p>"
         )
 
+        provenance = (
+            '<div class="provenance-grid">'
+            + _html_provenance_panel(report, pair, pair.student_a)
+            + _html_provenance_panel(report, pair, pair.student_b)
+            + "</div>"
+        )
+
+        pair_metadata = (
+            "<p>"
+            f"<strong>Embedding max:</strong> "
+            f"{_html_optional_score(pair.embedding_max_similarity)} &nbsp; "
+            f"<strong>Pseudocode max:</strong> "
+            f"{_html_optional_score(pair.pseudocode_max_similarity)} &nbsp; "
+            f"<strong>Clusters:</strong> "
+            f"{escape(', '.join(pair.cluster_ids) or '—')} &nbsp; "
+            f"<strong>Trend count:</strong> {_trend_count(report, pair)}"
+            "</p>"
+        )
+
         detail_sections.append(
             '<section class="pair-detail">'
             + pair_heading
+            + pair_metadata
             + "\n".join(question_sections)
+            + "<h4>Submission provenance</h4>"
+            + provenance
+            + "<h4>Pair signals</h4>"
+            + _html_pair_signals(pair)
             + "<h4>Warnings / notes</h4>"
             + notes
             + "</section>"
@@ -347,6 +743,12 @@ h1, h2, h3, h4, h5 {{ line-height: 1.2; }}
   margin: 1rem 0 1.5rem;
   background: #f7f7f7;
 }}
+.semantic-warning, .assistive-warning {{
+  border-left: 4px solid #666;
+  padding: .75rem 1rem;
+  margin: 1rem 0;
+  background: #fafafa;
+}}
 table {{
   border-collapse: collapse;
   width: 100%;
@@ -359,12 +761,12 @@ th, td {{
   vertical-align: top;
 }}
 th {{ background: #f1f1f1; }}
-.answer-grid {{
+.answer-grid, .provenance-grid {{
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
 }}
-.answer-panel {{
+.answer-panel, .provenance-panel {{
   border: 1px solid #bbb;
   border-radius: 6px;
   padding: .75rem;
@@ -393,7 +795,7 @@ th {{ background: #f1f1f1; }}
 }}
 code {{ white-space: pre-wrap; }}
 @media (max-width: 800px) {{
-  .answer-grid {{ grid-template-columns: 1fr; }}
+  .answer-grid, .provenance-grid {{ grid-template-columns: 1fr; }}
 }}
 </style>
 </head>
@@ -401,16 +803,22 @@ code {{ white-space: pre-wrap; }}
 <h1>Submission Similarity Review</h1>
 
 <div class="disclaimer"><strong>{escape(DISCLAIMER)}</strong></div>
+{embedding_notice}
 
 <p>
   <strong>Assignment:</strong> {escape(report.assignment_id)}<br>
   <strong>Generated:</strong> {escape(report.generated_at)}<br>
   <strong>Students:</strong> {len(report.students)}<br>
-  <strong>Pairs compared:</strong> {len(report.pairs)}
+  <strong>Pairs compared:</strong> {len(report.pairs)}<br>
+  <strong>Clusters:</strong> {len(report.clusters)}<br>
+  <strong>Cross-assignment trends:</strong> {len(report.trends)}
 </p>
 
-<h2>Methods</h2>
+<h2>Deterministic methods</h2>
 <ul>{method_items}</ul>
+
+<h2>Advanced methods</h2>
+<ul>{advanced_method_items}</ul>
 
 <h2>Thresholds</h2>
 <ul>{threshold_rows}</ul>
@@ -427,10 +835,49 @@ code {{ white-space: pre-wrap; }}
   <th>Exact File</th>
   <th>Normalized Match</th>
   <th>Max N-gram</th>
+  <th>Embedding Max</th>
+  <th>Pseudocode Max</th>
+  <th>Cluster</th>
+  <th>Trend Count</th>
 </tr>
 </thead>
 <tbody>
 {summary_rows}
+</tbody>
+</table>
+
+<h2>Clusters</h2>
+<table>
+<thead>
+<tr>
+  <th>Cluster ID</th>
+  <th>Size</th>
+  <th>Students</th>
+  <th>Max Similarity</th>
+  <th>Questions</th>
+  <th>Signals</th>
+</tr>
+</thead>
+<tbody>
+{_html_cluster_rows(report)}
+</tbody>
+</table>
+
+<h2>Trends</h2>
+<table>
+<thead>
+<tr>
+  <th>Student A</th>
+  <th>Student B</th>
+  <th>Assignments Flagged</th>
+  <th>Count</th>
+  <th>Max Similarity</th>
+  <th>Questions</th>
+  <th>Signals</th>
+</tr>
+</thead>
+<tbody>
+{_html_trend_rows(report)}
 </tbody>
 </table>
 
@@ -468,7 +915,7 @@ def export_similarity_report(
     include_matrix: bool = True,
     submissions: Mapping[str, Any] | None = None,
 ) -> dict[str, Path | None]:
-    """Export one similarity report in selected deterministic formats."""
+    """Export one similarity report in selected deterministic/advanced formats."""
 
     selected: list[str] = []
     for raw_format in formats:
@@ -492,6 +939,8 @@ def export_similarity_report(
         "json": None,
         "csv": None,
         "matrix_csv": None,
+        "clusters_csv": None,
+        "trends_csv": None,
         "html": None,
     }
 
@@ -505,6 +954,14 @@ def export_similarity_report(
         results["csv"] = export_similarity_pairs_csv(
             report,
             destination / CSV_FILENAME,
+        )
+        results["clusters_csv"] = export_similarity_clusters_csv(
+            report,
+            destination / CLUSTERS_FILENAME,
+        )
+        results["trends_csv"] = export_similarity_trends_csv(
+            report,
+            destination / TRENDS_FILENAME,
         )
         if include_matrix:
             results["matrix_csv"] = export_similarity_matrix_csv(
@@ -524,15 +981,22 @@ def export_similarity_report(
 
 __all__ = [
     "DISCLAIMER",
+    "EMBEDDING_DISCLAIMER",
     "JSON_FILENAME",
     "CSV_FILENAME",
     "MATRIX_FILENAME",
     "HTML_FILENAME",
+    "CLUSTERS_FILENAME",
+    "TRENDS_FILENAME",
     "CSV_COLUMNS",
+    "CLUSTER_CSV_COLUMNS",
+    "TREND_CSV_COLUMNS",
     "VALID_EXPORT_FORMATS",
     "export_similarity_json",
     "export_similarity_pairs_csv",
     "export_similarity_matrix_csv",
+    "export_similarity_clusters_csv",
+    "export_similarity_trends_csv",
     "render_similarity_report_html",
     "export_similarity_html",
     "export_similarity_report",
