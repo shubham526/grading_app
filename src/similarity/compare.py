@@ -118,7 +118,9 @@ def _submission_view(submission: Any) -> _SubmissionView:
     )
 
 
-def _validate_thresholds(thresholds: Mapping[str, Any] | None) -> dict[str, float]:
+def resolve_similarity_thresholds(
+    thresholds: Mapping[str, Any] | None = None,
+) -> dict[str, float]:
     merged = dict(DEFAULT_THRESHOLDS)
     if thresholds is not None:
         unknown = set(thresholds) - set(DEFAULT_THRESHOLDS)
@@ -344,7 +346,7 @@ def compare_submissions(
     if short_answer_token_threshold <= 0:
         raise ValueError("short_answer_token_threshold must be positive")
 
-    resolved_thresholds = _validate_thresholds(thresholds)
+    resolved_thresholds = resolve_similarity_thresholds(thresholds)
     view_a = _submission_view(student_a)
     view_b = _submission_view(student_b)
 
@@ -468,6 +470,7 @@ def compare_submissions(
 __all__ = [
     "DEFAULT_THRESHOLDS",
     "SHORT_ANSWER_TOKEN_THRESHOLD",
+    "resolve_similarity_thresholds",
     "compare_submissions",
     "compute_question_ngram_similarity",
 ]

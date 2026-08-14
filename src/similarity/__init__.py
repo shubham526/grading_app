@@ -9,6 +9,7 @@ from .compare import (
     SHORT_ANSWER_TOKEN_THRESHOLD,
     compare_submissions,
     compute_question_ngram_similarity,
+    resolve_similarity_thresholds,
 )
 from .hashing import compute_file_sha256, compute_text_sha256
 from .models import (
@@ -20,6 +21,7 @@ from .models import (
     SimilaritySignal,
 )
 from .normalize import normalize_for_similarity
+from .report import DEFAULT_METHODS, generate_similarity_report
 from .shingles import (
     jaccard_similarity,
     make_word_shingles,
@@ -37,6 +39,9 @@ __all__ = [
     "SHORT_ANSWER_TOKEN_THRESHOLD",
     "compare_submissions",
     "compute_question_ngram_similarity",
+    "resolve_similarity_thresholds",
+    "DEFAULT_METHODS",
+    "generate_similarity_report",
     "compute_file_sha256",
     "compute_text_sha256",
     "normalize_for_similarity",
