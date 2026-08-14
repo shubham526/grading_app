@@ -5,6 +5,11 @@ package with optional semantic-embedding and pseudocode-structure signals
 while keeping automated tests fully offline.
 """
 
+from .clustering import (
+    DEFAULT_CLUSTER_MIN_FLAG_LEVEL,
+    build_similarity_graph,
+    find_similarity_clusters,
+)
 from .compare import (
     DEFAULT_THRESHOLDS,
     SHORT_ANSWER_TOKEN_THRESHOLD,
@@ -87,6 +92,9 @@ __all__ = [
     "QuestionSimilarity",
     "PairSimilarity",
     "SimilarityReport",
+    "DEFAULT_CLUSTER_MIN_FLAG_LEVEL",
+    "build_similarity_graph",
+    "find_similarity_clusters",
     "EmbeddingProvider",
     "MockEmbeddingProvider",
     "DEFAULT_SENTENCE_TRANSFORMER_MODEL",

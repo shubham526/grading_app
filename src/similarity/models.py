@@ -93,6 +93,7 @@ class PairSimilarity:
     notes: list[str] = field(default_factory=list)
     embedding_max_similarity: float | None = None
     pseudocode_max_similarity: float | None = None
+    cluster_ids: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.student_a = str(self.student_a or "").strip()
@@ -123,6 +124,16 @@ class PairSimilarity:
                 raise ValueError(
                     "PairSimilarity.pseudocode_max_similarity must be between 0 and 1."
                 )
+
+        cleaned_cluster_ids: list[str] = []
+        seen_cluster_ids: set[str] = set()
+        for raw_cluster_id in self.cluster_ids:
+            cluster_id = str(raw_cluster_id or "").strip()
+            if not cluster_id or cluster_id in seen_cluster_ids:
+                continue
+            seen_cluster_ids.add(cluster_id)
+            cleaned_cluster_ids.append(cluster_id)
+        self.cluster_ids = cleaned_cluster_ids
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
