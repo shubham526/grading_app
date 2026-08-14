@@ -1,7 +1,8 @@
-"""Deterministic submission-similarity primitives for v2.3.0.
+"""Submission-similarity review primitives.
 
-This package intentionally contains no LLM, embedding, OCR, network, or
-misconduct-classification logic.
+v2.3.0 deterministic signals remain the foundation. v2.3.1 extends this
+package with optional semantic-embedding primitives while keeping provider
+dependencies isolated and automated tests fully offline.
 """
 
 from .compare import (
@@ -28,6 +29,16 @@ from .export import (
     export_similarity_report,
     render_similarity_report_html,
 )
+from .embedding_provider import EmbeddingProvider
+from .embeddings import (
+    cosine_similarity,
+    default_embedding_cache_dir,
+    embedding_cache_key,
+    get_embeddings,
+    load_cached_embedding,
+    save_cached_embedding,
+)
+from .mock_embedding_provider import MockEmbeddingProvider
 from .highlight import find_shared_spans, render_side_by_side_html
 from .hashing import compute_file_sha256, compute_text_sha256
 from .models import (
@@ -53,6 +64,14 @@ __all__ = [
     "QuestionSimilarity",
     "PairSimilarity",
     "SimilarityReport",
+    "EmbeddingProvider",
+    "MockEmbeddingProvider",
+    "cosine_similarity",
+    "default_embedding_cache_dir",
+    "embedding_cache_key",
+    "get_embeddings",
+    "load_cached_embedding",
+    "save_cached_embedding",
     "DEFAULT_THRESHOLDS",
     "SHORT_ANSWER_TOKEN_THRESHOLD",
     "VALID_SIMILARITY_METHODS",
