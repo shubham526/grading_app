@@ -72,6 +72,7 @@ def _preflight_failure_status(result: TranscriptionPreflightResult) -> Transcrip
         "model_not_installed",
         "model_not_vision_capable",
         "model_load_failure",
+        "model_load_timeout",
     }:
         return TranscriptionStatus.MODEL_LOAD_FAILURE
     return TranscriptionStatus.UNAVAILABLE

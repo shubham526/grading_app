@@ -199,8 +199,9 @@ class SubmissionSettingsDialog(QDialog):
         outer.addLayout(test_row)
 
         note = QLabel(
-            "The app does not start or manage the SSH tunnel. Cached transcription can still "
-            "be viewed when Ollama is unavailable.",
+            "Test Connection checks the server, installed model, and vision capability without "
+            "cold-loading the model. The model is loaded only when transcription is actually "
+            "needed. Cached transcription can still be viewed when Ollama is unavailable.",
             self,
         )
         note.setObjectName("connectionNote")
@@ -259,7 +260,7 @@ class SubmissionSettingsDialog(QDialog):
         if ok:
             capabilities = list(getattr(result, "capabilities", []) or [])
             suffix = " · Vision" if "vision" in capabilities else ""
-            self.connection_status.setText(f"Connected · {model}{suffix}")
+            self.connection_status.setText(f"Connected · {model} available{suffix}")
             self.connection_status.setStyleSheet("color: #2E7D5B; font-weight: 600;")
             return
 

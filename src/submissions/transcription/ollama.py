@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 import socket
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -37,9 +37,11 @@ DEFAULT_TEMPERATURE = 0.0
 DEFAULT_SEED = 42
 DEFAULT_NUM_CTX = 8192
 DEFAULT_NUM_PREDICT = 2048
-DEFAULT_REQUEST_TIMEOUT = 180.0
+DEFAULT_REQUEST_TIMEOUT = 300.0
 DEFAULT_PREFLIGHT_TIMEOUT = 10.0
-DEFAULT_KEEP_ALIVE = "10m"
+DEFAULT_MODEL_LOAD_TIMEOUT = 600.0
+DEFAULT_INFERENCE_TIMEOUT = 300.0
+DEFAULT_KEEP_ALIVE = "30m"
 DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
@@ -52,6 +54,18 @@ class _OllamaRequestError(RuntimeError):
         self.code = code
         self.message = message
         self.http_status = http_status
+
+
+def _is_timeout_exception(exc: BaseException) -> bool:
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(exc, urllib_error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (socket.timeout, TimeoutError)):
+            return True
+        if "timed out" in str(reason or exc).lower():
+            return True
+    return "timed out" in str(exc).lower()
 
 
 def _normalize_base_url(url: str) -> str:
@@ -155,11 +169,14 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
         num_predict: int = DEFAULT_NUM_PREDICT,
         request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
         preflight_timeout: float = DEFAULT_PREFLIGHT_TIMEOUT,
+        model_load_timeout: float = DEFAULT_MODEL_LOAD_TIMEOUT,
+        inference_timeout: float = DEFAULT_INFERENCE_TIMEOUT,
         keep_alive: Any = DEFAULT_KEEP_ALIVE,
         max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
         warm_model: bool = True,
         api_key: Optional[str] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.base_url = _normalize_base_url(base_url)
         self._model = str(model).strip()
@@ -177,12 +194,27 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
         self.num_predict = _validate_positive_int("num_predict", num_predict)
         self.request_timeout = _validate_timeout("request_timeout", request_timeout)
         self.preflight_timeout = _validate_timeout("preflight_timeout", preflight_timeout)
+        self.model_load_timeout = _validate_timeout("model_load_timeout", model_load_timeout)
+        self.inference_timeout = _validate_timeout("inference_timeout", inference_timeout)
         self.keep_alive = keep_alive
         self.max_image_bytes = _validate_positive_int("max_image_bytes", max_image_bytes)
         self.max_response_bytes = _validate_positive_int("max_response_bytes", max_response_bytes)
         self.warm_model = bool(warm_model)
         self.api_key = api_key or os.environ.get("OLLAMA_API_KEY")
+        self._progress_callback = progress_callback
         self._preflight_cache: Optional[TranscriptionPreflightResult] = None
+
+    def set_progress_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        self._progress_callback = callback
+
+    def _progress(self, message: str) -> None:
+        callback = self._progress_callback
+        if callback is not None:
+            try:
+                callback(str(message))
+            except Exception:
+                # UI progress reporting must never affect inference semantics.
+                pass
 
     @property
     def backend_name(self) -> str:
@@ -263,6 +295,8 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
                 http_status=getattr(exc, "code", None),
             ) from exc
         except (urllib_error.URLError, socket.timeout, TimeoutError, OSError) as exc:
+            if _is_timeout_exception(exc):
+                raise _OllamaRequestError("ollama_timeout", str(exc) or "timed out") from exc
             raise _OllamaRequestError("ollama_unavailable", str(exc)) from exc
 
         try:
@@ -312,10 +346,18 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
         if self._preflight_cache is not None and not force:
             return self._preflight_cache
 
+        self._progress("Checking Ollama connection and model availability…")
         try:
             tags = self._json_request("GET", "/tags", timeout=self.preflight_timeout)
         except _OllamaRequestError as exc:
-            result = self._preflight_failure(exc.code, exc.message)
+            if exc.code == "ollama_timeout":
+                result = self._preflight_failure(
+                    "connection_timeout",
+                    f"Ollama did not respond within {self.preflight_timeout:g} seconds.",
+                    metadata={"underlying_error_code": exc.code},
+                )
+            else:
+                result = self._preflight_failure(exc.code, exc.message)
             self._preflight_cache = result
             return result
 
@@ -364,8 +406,11 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
             warnings.append("model_capability_check_failed")
 
         if self.warm_model:
+            self._progress(
+                f"Loading {self.model_name}… this can take several minutes when the model is cold."
+            )
             try:
-                self._json_request(
+                warm_response = self._json_request(
                     "POST",
                     "/generate",
                     payload={
@@ -374,17 +419,31 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
                         "stream": False,
                         "keep_alive": self.keep_alive,
                     },
-                    timeout=self.request_timeout,
+                    timeout=self.model_load_timeout,
                 )
             except _OllamaRequestError as exc:
+                if exc.code == "ollama_timeout":
+                    code = "model_load_timeout"
+                    message = (
+                        f"Loading {self.model_name!r} exceeded {self.model_load_timeout:g} seconds. "
+                        "The GPU may be busy or may not have enough free memory."
+                    )
+                else:
+                    code = "model_load_failure"
+                    message = f"Ollama could not load {self.model_name!r}: {exc.message}"
                 result = self._preflight_failure(
-                    "model_load_failure",
-                    f"Ollama could not load {self.model_name!r}: {exc.message}",
+                    code,
+                    message,
                     warnings=warnings,
                     metadata={"underlying_error_code": exc.code},
                 )
                 self._preflight_cache = result
                 return result
+        else:
+            warm_response = {}
+
+        if self.warm_model:
+            self._progress(f"{self.model_name} ready · transcribing scan…")
 
         result = TranscriptionPreflightResult(
             ok=True,
@@ -395,6 +454,8 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
             warnings=warnings,
             metadata={
                 "warm_model": self.warm_model,
+                "model_load_timeout_seconds": self.model_load_timeout,
+                "model_load_duration_ns": warm_response.get("load_duration") if isinstance(warm_response, dict) else None,
                 "model_details": show_payload.get("details") if isinstance(show_payload, dict) else None,
             },
         )
@@ -462,6 +523,7 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
                     "model_not_installed",
                     "model_not_vision_capable",
                     "model_load_failure",
+                    "model_load_timeout",
                 }
                 else TranscriptionStatus.UNAVAILABLE
             )
@@ -499,17 +561,23 @@ class OllamaTranscriptionBackend(TranscriptionBackend):
                 "POST",
                 "/chat",
                 payload=payload,
-                timeout=self.request_timeout,
+                timeout=self.inference_timeout,
             )
         except _OllamaRequestError as exc:
+            warning = "inference_timeout" if exc.code == "ollama_timeout" else exc.code
+            message = (
+                f"Transcription inference exceeded {self.inference_timeout:g} seconds."
+                if exc.code == "ollama_timeout"
+                else exc.message
+            )
             return self._failure_page(
                 image_path,
                 page,
                 TranscriptionStatus.INFERENCE_FAILURE,
-                exc.code,
-                exc.message,
+                warning,
+                message,
                 duration_seconds=time.monotonic() - started,
-                metadata={"http_status": exc.http_status},
+                metadata={"http_status": exc.http_status, "underlying_error_code": exc.code},
             )
 
         message = response.get("message")
@@ -589,6 +657,8 @@ __all__ = [
     "DEFAULT_KEEP_ALIVE",
     "DEFAULT_MAX_IMAGE_BYTES",
     "DEFAULT_MAX_RESPONSE_BYTES",
+    "DEFAULT_MODEL_LOAD_TIMEOUT",
+    "DEFAULT_INFERENCE_TIMEOUT",
     "DEFAULT_NUM_CTX",
     "DEFAULT_NUM_PREDICT",
     "DEFAULT_OLLAMA_URL",

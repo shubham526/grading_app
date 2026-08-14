@@ -3,8 +3,9 @@
 v2.1 provides student-centric and question-centric manual grading with stable
 criterion/question identity and partial-save behavior. v2.2 Commit 5 integrates
 the submission backend into that same workflow: persistent LaTeX/PDF evidence,
-a resizable document/text workspace, explicit PDF-accommodation handling,
-background Ollama transcription jobs, and non-scoring submission metadata.
+a Gradescope-style submission-left / grading-right workspace, explicit
+PDF-accommodation handling, background Ollama transcription jobs, and
+non-scoring submission metadata.
 
 All potentially slow submission work runs through ``SubmissionWorker``. The
 window remains the UI/session orchestrator; parsing, persistence, and inference
@@ -25,10 +26,10 @@ from PyQt5.QtWidgets import (
     QAction, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFileDialog, QScrollArea,
     QLineEdit, QMessageBox, QGroupBox, QInputDialog, QMenu, QToolButton,
-    QFrame, QSplitter, QDialog, QComboBox, QSizePolicy,
+    QFrame, QSplitter, QSplitterHandle, QDialog, QComboBox, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QSettings, QThreadPool, QTimer, QUrl
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QColor, QPainter
 import qtawesome as qta
 
 from src.core.assessment import (
@@ -54,6 +55,7 @@ from src.core.roster import (
     safe_student_filename,
 )
 from src.core.rubric import load_rubric_from_file
+from src.submissions import load_reference_solution
 
 from src.ui.widgets.header import HeaderWidget
 from src.ui.widgets.status_bar import StatusBarWidget
@@ -89,11 +91,44 @@ QUESTION_CENTRIC = "question_centric"
 _UI_SETTINGS_GROUP = "main_window_v2_2"
 _UI_GEOMETRY_KEY = "geometry"
 _UI_MAXIMIZED_KEY = "maximized"
-_UI_WORKSPACE_SPLITTER_KEY = "workspace_splitter"
+_UI_SESSION_SPLITTER_KEY = "session_workspace_splitter_v2"
+_UI_WORKSPACE_SPLITTER_KEY = "workspace_splitter_horizontal_v2"
 _UI_GRADING_SPLITTER_KEY = "grading_splitter"
-_UI_EVIDENCE_SPLITTER_KEY = "evidence_splitter"
 _UI_GRADING_CARD_COLLAPSED_KEY = "grading_card_collapsed"
+_UI_QUESTION_SUMMARY_COLLAPSED_KEY = "question_summary_collapsed"
 _UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY = "attempted_questions_visible"
+
+
+class GripSplitterHandle(QSplitterHandle):
+    """Splitter handle that remains visibly draggable in every state."""
+
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self.setCursor(Qt.SplitHCursor if orientation == Qt.Horizontal else Qt.SplitVCursor)
+        self.setToolTip("Drag to resize")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#E4E7EC"))
+
+        # A persistent center grip avoids the almost-invisible native Qt handle
+        # that caused confusion during the manual acceptance pass.
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#667085"))
+        center = self.rect().center()
+        if self.orientation() == Qt.Horizontal:
+            for dy in (-8, 0, 8):
+                painter.drawRoundedRect(center.x() - 2, center.y() + dy - 2, 4, 4, 2, 2)
+        else:
+            for dx in (-8, 0, 8):
+                painter.drawRoundedRect(center.x() + dx - 2, center.y() - 2, 4, 4, 2, 2)
+
+
+class PersistentGripSplitter(QSplitter):
+    """QSplitter with a persistent, easy-to-hit resize handle."""
+
+    def createHandle(self):
+        return GripSplitterHandle(self.orientation(), self)
 
 
 class RubricGrader(QMainWindow):
@@ -135,6 +170,7 @@ class RubricGrader(QMainWindow):
         self.submission_controller = SubmissionController()
         self.current_submission = None
         self.submissions_dir = None
+        self.reference_solution = None
 
         self.submission_thread_pool = QThreadPool.globalInstance()
         self._submission_workers = {}
@@ -143,10 +179,14 @@ class RubricGrader(QMainWindow):
         self._latest_folder_request_id = None
         self._latest_request_by_student = {}
         self._latest_connection_request_id = None
+        self._latest_reference_request_id = None
         self._submission_settings_dialog = None
         self.submission_inference_settings = load_submission_settings()
         self._submission_focus_mode = False
         self._workspace_sizes_before_focus = None
+        self._session_sizes_before_focus = None
+        self._workspace_popout_dialog = None
+        self._workspace_popout_context_label = None
 
         self.ui_settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
 
@@ -218,6 +258,14 @@ class RubricGrader(QMainWindow):
         self.load_submissions_btn.clicked.connect(self.load_submissions_folder)
         toolbar_layout.addWidget(self.load_submissions_btn)
 
+        self.load_reference_solution_btn = QPushButton("Load Reference Solution")
+        self.load_reference_solution_btn.setIcon(qta.icon('fa5s.check-circle'))
+        self.load_reference_solution_btn.setToolTip(
+            "Load an instructor reference solution; LaTeX is recommended, digital PDF is supported"
+        )
+        self.load_reference_solution_btn.clicked.connect(self.load_reference_solution_file)
+        toolbar_layout.addWidget(self.load_reference_solution_btn)
+
         self.add_pdf_accommodation_btn = QPushButton("Add PDF Accommodation")
         self.add_pdf_accommodation_btn.setIcon(qta.icon('fa5s.file-pdf'))
         self.add_pdf_accommodation_btn.setToolTip(
@@ -226,7 +274,7 @@ class RubricGrader(QMainWindow):
         self.add_pdf_accommodation_btn.clicked.connect(self.add_pdf_accommodation)
         toolbar_layout.addWidget(self.add_pdf_accommodation_btn)
 
-        self.load_assessment_folder_btn = QPushButton("Grades & Evidence Folder")
+        self.load_assessment_folder_btn = QPushButton("Grades + Evidence Folder")
         self.load_assessment_folder_btn.setIcon(qta.icon('fa5s.folder'))
         self.load_assessment_folder_btn.setToolTip(
             "Choose where assessment JSON files and persistent submission evidence are stored"
@@ -301,6 +349,15 @@ class RubricGrader(QMainWindow):
 
         main_layout.addWidget(toolbar_container)
 
+        # Setup/navigation lives in the upper child of a vertical splitter.
+        # The actual grading workspace is the lower child, so instructors can
+        # devote most of the screen to PDF + grading during routine marking.
+        self.session_panel = QWidget()
+        self.session_panel.setObjectName("sessionPanel")
+        session_layout = QVBoxLayout(self.session_panel)
+        session_layout.setContentsMargins(0, 0, 0, 0)
+        session_layout.setSpacing(10)
+
         # ----------------------- student/assignment context -----------------------
         self.info_widget = QWidget()
         info_widget = self.info_widget
@@ -337,7 +394,7 @@ class RubricGrader(QMainWindow):
         self.status_label.setStyleSheet("color: #667085;")
         self.status_label.setWordWrap(True)
         info_layout.addWidget(self.status_label, 3)
-        main_layout.addWidget(info_widget)
+        session_layout.addWidget(info_widget)
 
         # ----------------------- compact grading summary -----------------------
         self.config_card = CardWidget("Grading", collapsible=True, initially_collapsed=True)
@@ -345,7 +402,7 @@ class RubricGrader(QMainWindow):
         self.config_info = QLabel()
         self.config_info.setWordWrap(True)
         config_layout.addWidget(self.config_info)
-        main_layout.addWidget(self.config_card)
+        session_layout.addWidget(self.config_card)
         self.update_config_info()
 
         # ------------------------- workflow/context card -------------------------
@@ -450,12 +507,12 @@ class RubricGrader(QMainWindow):
         self.question_mode_controls.setMinimumHeight(92)
         self.question_mode_controls.setVisible(False)
         workflow_layout.addWidget(self.question_mode_controls)
-        main_layout.addWidget(self.workflow_card)
+        session_layout.addWidget(self.workflow_card)
 
         # QGroupBox titles consume space above their content.  Keep a small
         # explicit gap so the following 'Questions Attempted' title can never
         # paint over the bottom row of the grading-context card.
-        main_layout.addSpacing(6)
+        session_layout.addSpacing(6)
 
         self.workflow_mode_combo.currentIndexChanged.connect(self.on_workflow_mode_changed)
         self.question_combo.currentIndexChanged.connect(self.on_question_combo_changed)
@@ -467,11 +524,14 @@ class RubricGrader(QMainWindow):
         self.question_selection_layout = QHBoxLayout()
         self.question_selection_group.setLayout(self.question_selection_layout)
         self.question_selection_group.setVisible(False)
-        main_layout.addWidget(self.question_selection_group)
+        session_layout.addWidget(self.question_selection_group)
 
         # ------------------------- submission workspace -------------------------
+        # Manual grading uses a Gradescope-style arrangement: the rendered
+        # submission remains visible on the left while rubric controls remain
+        # visible on the right. Source/transcription text opens on demand.
         self.submission_workspace = SubmissionWorkspace(self)
-        self.submission_workspace.setMinimumHeight(320)
+        self.submission_workspace.setMinimumWidth(460)
         self.submission_workspace.open_source_requested.connect(self.open_submission_source)
         self.submission_workspace.refresh_requested.connect(self.refresh_submission_evidence)
         self.submission_workspace.generate_transcription_requested.connect(
@@ -479,6 +539,9 @@ class RubricGrader(QMainWindow):
         )
         self.submission_workspace.focus_requested.connect(
             self._on_submission_focus_requested
+        )
+        self.submission_workspace.popout_workspace_requested.connect(
+            self._pop_out_grading_workspace
         )
 
         # --------------------------- grading workspace ---------------------------
@@ -496,44 +559,108 @@ class RubricGrader(QMainWindow):
             "Question Scores Summary", collapsible=True, initially_collapsed=True
         )
         self.question_summary_layout = self.question_summary_card.get_content_layout()
+        self.question_summary_card.collapsed_changed.connect(
+            self._on_question_summary_collapsed_changed
+        )
 
-        self.main_splitter = QSplitter(Qt.Vertical)
+        self.main_splitter = PersistentGripSplitter(Qt.Vertical)
         self.main_splitter.setObjectName("gradingSplitter")
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setHandleWidth(6)
+        self.main_splitter.setHandleWidth(7)
         self.main_splitter.addWidget(self.scroll_area)
         self.summary_container = QWidget()
         summary_layout = QVBoxLayout(self.summary_container)
         summary_layout.setContentsMargins(0, 0, 0, 0)
         summary_layout.addWidget(self.question_summary_card)
         self.main_splitter.addWidget(self.summary_container)
-        self.main_splitter.setStretchFactor(0, 5)
+        self.main_splitter.setStretchFactor(0, 6)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([520, 90])
+        self.main_splitter.setSizes([610, 80])
 
         self.grading_workspace = QWidget()
+        self.grading_workspace.setObjectName("gradingWorkspace")
+        self.grading_workspace.setMinimumWidth(420)
         grading_layout = QVBoxLayout(self.grading_workspace)
         grading_layout.setContentsMargins(0, 0, 0, 0)
         grading_layout.setSpacing(0)
-        grading_layout.addWidget(self.main_splitter)
 
-        self.workspace_splitter = QSplitter(Qt.Vertical)
+        grading_header = QWidget(self.grading_workspace)
+        grading_header.setObjectName("gradingPaneHeader")
+        grading_header_layout = QHBoxLayout(grading_header)
+        grading_header_layout.setContentsMargins(12, 8, 12, 8)
+        self.grading_pane_title = QLabel("Grading", grading_header)
+        self.grading_pane_title.setObjectName("gradingPaneTitle")
+        grading_header_layout.addWidget(self.grading_pane_title)
+        grading_header_layout.addStretch(1)
+        grading_layout.addWidget(grading_header)
+        grading_layout.addWidget(self.main_splitter, 1)
+
+        # Main work splitter: submission on the left, grading on the right.
+        # The 12px handle remains visible while hovered/pressed and neither
+        # child can collapse to zero.
+        self.workspace_splitter = PersistentGripSplitter(Qt.Horizontal)
         self.workspace_splitter.setObjectName("mainWorkspaceSplitter")
         self.workspace_splitter.setChildrenCollapsible(False)
-        self.workspace_splitter.setHandleWidth(10)
+        self.workspace_splitter.setHandleWidth(12)
         self.workspace_splitter.setOpaqueResize(True)
         self.workspace_splitter.addWidget(self.submission_workspace)
         self.workspace_splitter.addWidget(self.grading_workspace)
         self.workspace_splitter.setStretchFactor(0, 6)
-        self.workspace_splitter.setStretchFactor(1, 4)
-        self.workspace_splitter.setSizes([520, 320])
+        self.workspace_splitter.setStretchFactor(1, 5)
+        self.workspace_splitter.setSizes([760, 640])
         self.workspace_splitter.setStyleSheet(
-            "QSplitter#mainWorkspaceSplitter::handle {"
-            "background: #D0D5DD; margin: 2px 0; border-radius: 2px;"
+            "QWidget#gradingPaneHeader {"
+            "background: #FFFFFF; border: 1px solid #D9DEE7;"
+            "border-bottom: 1px solid #E6E9EF;"
             "}"
-            "QSplitter#mainWorkspaceSplitter::handle:hover { background: #98A2B3; }"
+            "QLabel#gradingPaneTitle { color: #1F2937; font-weight: 600; }"
         )
-        main_layout.addWidget(self.workspace_splitter, 1)
+
+        # Host remains in the main window even while the exact same two-panel
+        # workspace is temporarily reparented into a pop-out window.
+        self.workspace_host = QWidget()
+        self.workspace_host.setObjectName("workspaceHost")
+        self.workspace_host_layout = QVBoxLayout(self.workspace_host)
+        self.workspace_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace_host_layout.setSpacing(0)
+        self.workspace_host_layout.addWidget(self.workspace_splitter)
+
+        self.workspace_popout_placeholder = QWidget(self.workspace_host)
+        placeholder_layout = QVBoxLayout(self.workspace_popout_placeholder)
+        placeholder_layout.setAlignment(Qt.AlignCenter)
+        placeholder_label = QLabel(
+            "Submission + grading workspace is open in a separate window.",
+            self.workspace_popout_placeholder,
+        )
+        placeholder_label.setStyleSheet("color: #667085; font-weight: 600;")
+        placeholder_layout.addWidget(placeholder_label, 0, Qt.AlignCenter)
+        reattach_button = QPushButton("Reattach Workspace", self.workspace_popout_placeholder)
+        reattach_button.clicked.connect(self._reattach_grading_workspace)
+        placeholder_layout.addWidget(reattach_button, 0, Qt.AlignCenter)
+        self.workspace_popout_placeholder.setVisible(False)
+        self.workspace_host_layout.addWidget(self.workspace_popout_placeholder)
+
+        # The upper setup/context area can itself be resized against the actual
+        # grading workspace. A scroll area keeps controls reachable if the
+        # instructor compresses this section aggressively.
+        self.session_scroll = QScrollArea()
+        self.session_scroll.setObjectName("sessionScrollArea")
+        self.session_scroll.setWidgetResizable(True)
+        self.session_scroll.setFrameShape(QFrame.NoFrame)
+        self.session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.session_scroll.setWidget(self.session_panel)
+
+        self.session_workspace_splitter = PersistentGripSplitter(Qt.Vertical)
+        self.session_workspace_splitter.setObjectName("sessionWorkspaceSplitter")
+        self.session_workspace_splitter.setChildrenCollapsible(False)
+        self.session_workspace_splitter.setHandleWidth(12)
+        self.session_workspace_splitter.setOpaqueResize(True)
+        self.session_workspace_splitter.addWidget(self.session_scroll)
+        self.session_workspace_splitter.addWidget(self.workspace_host)
+        self.session_workspace_splitter.setStretchFactor(0, 2)
+        self.session_workspace_splitter.setStretchFactor(1, 7)
+        self.session_workspace_splitter.setSizes([235, 665])
+        main_layout.addWidget(self.session_workspace_splitter, 1)
 
         # ------------------------- bottom grading controls -------------------------
         bottom_layout = QHBoxLayout()
@@ -563,6 +690,22 @@ class RubricGrader(QMainWindow):
         main_layout.addLayout(bottom_layout)
         self._update_submission_status()
 
+    def _on_question_summary_collapsed_changed(self, collapsed):
+        """Give the summary useful height immediately when the user shows it."""
+        splitter = getattr(self, "main_splitter", None)
+        if splitter is None:
+            return
+        sizes = list(splitter.sizes())
+        total = sum(max(0, int(v)) for v in sizes)
+        if total <= 0:
+            total = 600
+        if collapsed:
+            summary_height = 58
+        else:
+            summary_height = min(280, max(190, total // 3))
+        criteria_height = max(140, total - summary_height)
+        splitter.setSizes([criteria_height, summary_height])
+
     def _set_questions_attempted_visible(self, visible):
         """Keep attempted-question controls available without consuming grading space."""
         visible = bool(visible)
@@ -580,28 +723,162 @@ class RubricGrader(QMainWindow):
             self.submission_workspace.set_focus_mode(enabled)
             return
 
+        # The whole two-pane workspace has its own pop-out mode. Focus mode is
+        # only meaningful while that workspace is attached to the main window.
+        if enabled and self._workspace_popout_dialog is not None:
+            self._workspace_popout_dialog.raise_()
+            self._workspace_popout_dialog.activateWindow()
+            return
+
         self._submission_focus_mode = enabled
         self.submission_workspace.set_focus_mode(enabled)
 
         if enabled:
             self._workspace_sizes_before_focus = list(self.workspace_splitter.sizes())
-            self.config_card.setVisible(False)
-            self.workflow_card.setVisible(False)
-            self.question_selection_group.setVisible(False)
+            self._session_sizes_before_focus = list(self.session_workspace_splitter.sizes())
+            self.session_scroll.setVisible(False)
             self.grading_workspace.setVisible(False)
         else:
-            self.config_card.setVisible(True)
-            self.workflow_card.setVisible(True)
+            self.session_scroll.setVisible(True)
+            self.grading_workspace.setVisible(True)
             self._set_questions_attempted_visible(
                 self.attempted_questions_button.isChecked()
             )
-            self.grading_workspace.setVisible(True)
-            sizes = self._workspace_sizes_before_focus or [520, 320]
+            sizes = self._workspace_sizes_before_focus or [760, 640]
             self.workspace_splitter.setSizes(sizes)
+            session_sizes = self._session_sizes_before_focus or [235, 665]
+            self.session_workspace_splitter.setSizes(session_sizes)
             self._workspace_sizes_before_focus = None
+            self._session_sizes_before_focus = None
 
         self.centralWidget().layout().invalidate()
         self.centralWidget().layout().activate()
+
+    def _workspace_context_text(self):
+        student = self.student_name_edit.text().strip() if hasattr(self, "student_name_edit") else ""
+        question = self.current_question_id if self.workflow_mode == QUESTION_CENTRIC else None
+        if student and question:
+            return f"{student} · {question}"
+        if student:
+            return student
+        if question:
+            return question
+        return "Submission + grading workspace"
+
+    def _update_workspace_popout_context(self):
+        if self._workspace_popout_context_label is not None:
+            self._workspace_popout_context_label.setText(self._workspace_context_text())
+
+    def _pop_out_grading_workspace(self):
+        """Move the exact live submission + grading workspace to a window.
+
+        No grading widgets are duplicated. Reparenting the existing horizontal
+        splitter guarantees scores, comments, PDF state, and question-summary
+        state remain identical in attached and popped-out modes.
+        """
+        if self.current_submission is None:
+            return
+        if self._workspace_popout_dialog is not None:
+            self._workspace_popout_dialog.show()
+            self._workspace_popout_dialog.raise_()
+            self._workspace_popout_dialog.activateWindow()
+            return
+
+        if self._submission_focus_mode:
+            self._on_submission_focus_requested(False)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Submission + Grading Workspace")
+        dialog.resize(1450, 900)
+        dialog.setMinimumSize(980, 650)
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setContentsMargins(10, 10, 10, 10)
+        dialog_layout.setSpacing(8)
+
+        popout_header = QWidget(dialog)
+        header_layout = QHBoxLayout(popout_header)
+        header_layout.setContentsMargins(2, 0, 2, 0)
+        self._workspace_popout_context_label = QLabel(
+            self._workspace_context_text(), popout_header
+        )
+        self._workspace_popout_context_label.setStyleSheet(
+            "font-size: 14px; font-weight: 600; color: #1F2937;"
+        )
+        header_layout.addWidget(self._workspace_popout_context_label)
+        header_layout.addStretch(1)
+
+        prev_q = QPushButton("Previous Question", popout_header)
+        prev_q.clicked.connect(lambda: self.navigate_question(-1))
+        prev_q.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        header_layout.addWidget(prev_q)
+        next_q = QPushButton("Next Question", popout_header)
+        next_q.clicked.connect(lambda: self.navigate_question(1))
+        next_q.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        header_layout.addWidget(next_q)
+
+        prev_student = QPushButton("Previous Student", popout_header)
+        prev_student.clicked.connect(lambda: self.navigate_student(-1))
+        prev_student.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        header_layout.addWidget(prev_student)
+        next_student = QPushButton("Next Student", popout_header)
+        next_student.clicked.connect(lambda: self.navigate_student(1))
+        next_student.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        header_layout.addWidget(next_student)
+
+        save_button = QPushButton("Save", popout_header)
+        save_button.setProperty("buttonRole", "primary")
+        save_button.clicked.connect(
+            lambda: self.save_current_question(show_success=True)
+            if self.workflow_mode == QUESTION_CENTRIC
+            else self.save_assessment()
+        )
+        header_layout.addWidget(save_button)
+
+        if self.workflow_mode == QUESTION_CENTRIC:
+            save_next = QPushButton("Save + Next", popout_header)
+            save_next.clicked.connect(self.save_and_next_student)
+            header_layout.addWidget(save_next)
+
+        reattach = QPushButton("Reattach", popout_header)
+        reattach.clicked.connect(self._reattach_grading_workspace)
+        header_layout.addWidget(reattach)
+        dialog_layout.addWidget(popout_header)
+
+        self.workspace_host_layout.removeWidget(self.workspace_splitter)
+        self.workspace_splitter.setParent(dialog)
+        dialog_layout.addWidget(self.workspace_splitter, 1)
+        self.workspace_popout_placeholder.setVisible(True)
+
+        self._workspace_popout_dialog = dialog
+        dialog.finished.connect(
+            lambda _result, d=dialog: self._on_workspace_popout_closed(d)
+        )
+        dialog.show()
+
+    def _on_workspace_popout_closed(self, dialog):
+        if dialog is self._workspace_popout_dialog:
+            self._reattach_grading_workspace(close_dialog=False)
+
+    def _reattach_grading_workspace(self, close_dialog=True):
+        dialog = self._workspace_popout_dialog
+        if dialog is None:
+            return
+
+        layout = dialog.layout()
+        if layout is not None:
+            layout.removeWidget(self.workspace_splitter)
+        self.workspace_splitter.setParent(self.workspace_host)
+        self.workspace_host_layout.insertWidget(0, self.workspace_splitter)
+        self.workspace_popout_placeholder.setVisible(False)
+        self._workspace_popout_dialog = None
+        self._workspace_popout_context_label = None
+
+        self._ensure_usable_splitter_sizes()
+        if close_dialog:
+            dialog.close()
+            dialog.deleteLater()
+        else:
+            dialog.deleteLater()
 
     # ------------------------------------------------------------------
     # v2.2 submission-controller integration
@@ -636,10 +913,17 @@ class RubricGrader(QMainWindow):
         """Synchronize the visible evidence workspace with session context."""
         workspace = getattr(self, "submission_workspace", None)
         if workspace is not None:
+            workspace.set_reference_solution(self.reference_solution)
             workspace.set_submission(self.current_submission)
             workspace.set_question(
                 self.current_question_id if self.workflow_mode == QUESTION_CENTRIC else None
             )
+        if hasattr(self, "grading_pane_title"):
+            if self.workflow_mode == QUESTION_CENTRIC and self.current_question_id:
+                self.grading_pane_title.setText(f"Grading — {self.current_question_id}")
+            else:
+                self.grading_pane_title.setText("Grading")
+        self._update_workspace_popout_context()
         self._update_submission_status()
 
     def _sync_submission_context(self, assessment_data=None, *, load_persisted=True):
@@ -813,6 +1097,62 @@ class RubricGrader(QMainWindow):
                 "question_ids": self._submission_question_ids(),
                 "compile_pdf": True,
                 "persist_evidence": True,
+            },
+        )
+
+    def _load_persisted_reference_solution(self):
+        if not self.assessments_dir:
+            self.reference_solution = None
+        else:
+            try:
+                self.reference_solution = load_reference_solution(self.assessments_dir)
+            except (OSError, ValueError, json.JSONDecodeError):
+                self.reference_solution = None
+        workspace = getattr(self, "submission_workspace", None)
+        if workspace is not None:
+            workspace.set_reference_solution(self.reference_solution)
+        return self.reference_solution
+
+    def load_reference_solution_file(self):
+        """Load one assignment-level instructor reference solution.
+
+        LaTeX is preferred because it is canonical, math-safe, and directly
+        machine-readable. A digital PDF is supported as a fallback.
+        """
+        if not self.rubric_data:
+            QMessageBox.warning(self, "No Rubric", "Load the assignment rubric first.")
+            return
+        if not self._ensure_assessments_dir(allow_prompt=True):
+            return
+
+        source_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Reference Solution",
+            "",
+            "Reference Solutions (*.tex *.pdf);;LaTeX Files (*.tex);;PDF Files (*.pdf);;All Files (*)",
+        )
+        if not source_path:
+            return
+
+        if source_path.lower().endswith(".pdf"):
+            reply = QMessageBox.question(
+                self,
+                "Use PDF Reference Solution",
+                "LaTeX is recommended because mathematical notation and question boundaries "
+                "remain directly machine-readable for future AI-assisted grading. A digital "
+                "PDF with selectable text is supported as a fallback.\n\nContinue with this PDF?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Yes,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        self._start_submission_worker(
+            SubmissionOperation.LOAD_REFERENCE_SOLUTION,
+            parameters={
+                "source_path": os.path.abspath(source_path),
+                "assessments_dir": self.assessments_dir,
+                "question_ids": self._submission_question_ids(),
             },
         )
 
@@ -1042,6 +1382,8 @@ class RubricGrader(QMainWindow):
             self._latest_folder_request_id = request_id
         elif operation == SubmissionOperation.TEST_OLLAMA:
             self._latest_connection_request_id = request_id
+        elif operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION:
+            self._latest_reference_request_id = request_id
         elif target_student:
             try:
                 canonical = self.submission_controller.canonical_student_id(target_student)
@@ -1058,6 +1400,8 @@ class RubricGrader(QMainWindow):
             return request_id == self._latest_folder_request_id
         if operation == SubmissionOperation.TEST_OLLAMA.value:
             return request_id == self._latest_connection_request_id
+        if operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION.value:
+            return request_id == self._latest_reference_request_id
         if student_id:
             try:
                 canonical = self.submission_controller.canonical_student_id(student_id)
@@ -1091,6 +1435,8 @@ class RubricGrader(QMainWindow):
             self.status_bar.set_status("Loading LaTeX submissions…")
         elif operation == SubmissionOperation.TEST_OLLAMA.value:
             self.status_bar.show_temporary_message("Testing Ollama connection…")
+        elif operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION.value:
+            self.status_bar.set_status("Preparing reference solution…")
         else:
             self._set_submission_workspace_busy(student_id, True)
 
@@ -1181,13 +1527,54 @@ class RubricGrader(QMainWindow):
             self._set_submission_workspace_busy(student_id, False)
             if operation == SubmissionOperation.LOAD_PDF_ACCOMMODATION.value:
                 message = "PDF accommodation evidence prepared"
-            elif operation == SubmissionOperation.GENERATE_TRANSCRIPTION.value:
-                cache = getattr(payload, "transcription_metadata", {}).get("cache", {})
-                message = "Assistive transcription loaded from cache" if cache.get("status") == "hit" else "Assistive transcription generated"
             else:
-                message = "Assistive transcription refreshed"
+                transcription = getattr(payload, "transcription_metadata", {})
+                transcription = transcription if isinstance(transcription, dict) else {}
+                trans_status = str(transcription.get("status") or "")
+                if trans_status == "successful":
+                    cache = transcription.get("cache", {}) if isinstance(transcription.get("cache"), dict) else {}
+                    if operation == SubmissionOperation.GENERATE_TRANSCRIPTION.value:
+                        message = (
+                            "Assistive transcription loaded from cache"
+                            if cache.get("status") == "hit"
+                            else "Assistive transcription generated"
+                        )
+                    else:
+                        message = "Assistive transcription refreshed"
+                    self.status_bar.set_submission_status("PDF · transcription ready", "ready")
+                else:
+                    preflight = transcription.get("preflight", {}) if isinstance(transcription.get("preflight"), dict) else {}
+                    code = str(preflight.get("error_code") or "transcription_failed")
+                    labels = {
+                        "model_load_timeout": "model loading timed out",
+                        "model_load_failure": "model could not be loaded",
+                        "connection_timeout": "Ollama connection timed out",
+                        "ollama_unavailable": "Ollama unavailable",
+                        "model_not_installed": "model not installed",
+                    }
+                    message = f"Transcription unavailable · {labels.get(code, code.replace('_', ' '))}"
+                    self.status_bar.set_submission_status("PDF ready · AI unavailable", "warning")
             self.status_bar.set_status(message)
-            self.status_bar.show_temporary_message(message, duration=4000)
+            self.status_bar.show_temporary_message(message, duration=6000)
+            return
+
+        if operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION.value:
+            self.reference_solution = payload
+            self.submission_workspace.set_reference_solution(payload)
+            source_type = str(getattr(payload, "source_type", "") or "").lower()
+            if source_type == "latex":
+                message = "Reference solution ready · LaTeX canonical"
+            else:
+                selectable = bool(
+                    getattr(payload, "metadata", {}).get("extraction", {}).get("selectable_text")
+                )
+                message = (
+                    "Reference solution ready · PDF text extracted"
+                    if selectable
+                    else "Reference PDF loaded · no usable selectable text"
+                )
+            self.status_bar.set_status(message)
+            self.status_bar.show_temporary_message(message, duration=5000)
             return
 
         if operation == SubmissionOperation.TEST_OLLAMA.value:
@@ -1210,6 +1597,10 @@ class RubricGrader(QMainWindow):
             dialog = self._submission_settings_dialog
             if dialog is not None:
                 dialog.set_connection_test_failure(message)
+            return
+        if operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION.value:
+            self.status_bar.set_status("Reference solution unavailable")
+            self.status_bar.show_temporary_message(message, duration=7000)
             return
 
         self._set_submission_workspace_busy(student_id, False)
@@ -1241,10 +1632,16 @@ class RubricGrader(QMainWindow):
         try:
             store.setValue(_UI_GEOMETRY_KEY, self.saveGeometry())
             store.setValue(_UI_MAXIMIZED_KEY, self.isMaximized())
+            store.setValue(
+                _UI_SESSION_SPLITTER_KEY, self.session_workspace_splitter.saveState()
+            )
             store.setValue(_UI_WORKSPACE_SPLITTER_KEY, self.workspace_splitter.saveState())
             store.setValue(_UI_GRADING_SPLITTER_KEY, self.main_splitter.saveState())
-            store.setValue(_UI_EVIDENCE_SPLITTER_KEY, self.submission_workspace.splitter.saveState())
             store.setValue(_UI_GRADING_CARD_COLLAPSED_KEY, self.config_card.is_collapsed())
+            store.setValue(
+                _UI_QUESTION_SUMMARY_COLLAPSED_KEY,
+                self.question_summary_card.is_collapsed(),
+            )
             store.setValue(
                 _UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY,
                 self.attempted_questions_button.isChecked(),
@@ -1259,11 +1656,14 @@ class RubricGrader(QMainWindow):
         try:
             geometry = store.value(_UI_GEOMETRY_KEY)
             maximized = store.value(_UI_MAXIMIZED_KEY, False, type=bool)
+            session_state = store.value(_UI_SESSION_SPLITTER_KEY)
             workspace_state = store.value(_UI_WORKSPACE_SPLITTER_KEY)
             grading_state = store.value(_UI_GRADING_SPLITTER_KEY)
-            evidence_state = store.value(_UI_EVIDENCE_SPLITTER_KEY)
             grading_card_collapsed = store.value(
                 _UI_GRADING_CARD_COLLAPSED_KEY, True, type=bool
+            )
+            question_summary_collapsed = store.value(
+                _UI_QUESTION_SUMMARY_COLLAPSED_KEY, True, type=bool
             )
             attempted_questions_visible = store.value(
                 _UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY, False, type=bool
@@ -1273,13 +1673,21 @@ class RubricGrader(QMainWindow):
 
         if geometry:
             self.restoreGeometry(geometry)
+        if session_state:
+            self.session_workspace_splitter.restoreState(session_state)
         if workspace_state:
             self.workspace_splitter.restoreState(workspace_state)
         if grading_state:
             self.main_splitter.restoreState(grading_state)
-        if evidence_state:
-            self.submission_workspace.splitter.restoreState(evidence_state)
+
+        # Saved QSplitter state contains orientation. Explicitly enforce the
+        # v2 layout after restoration so legacy vertical workspace state can
+        # never silently turn the Gradescope split vertical again.
+        self.session_workspace_splitter.setOrientation(Qt.Vertical)
+        self.workspace_splitter.setOrientation(Qt.Horizontal)
+        self.main_splitter.setOrientation(Qt.Vertical)
         self.config_card.set_collapsed(grading_card_collapsed)
+        self.question_summary_card.set_collapsed(question_summary_collapsed)
         self.attempted_questions_button.setChecked(attempted_questions_visible)
         self._set_questions_attempted_visible(attempted_questions_visible)
         if maximized:
@@ -1292,7 +1700,10 @@ class RubricGrader(QMainWindow):
 
     def _ensure_usable_splitter_sizes(self):
         self._normalize_splitter_sizes(
-            self.workspace_splitter, minimums=(300, 180), fallback=(520, 320)
+            self.session_workspace_splitter, minimums=(140, 320), fallback=(235, 665)
+        )
+        self._normalize_splitter_sizes(
+            self.workspace_splitter, minimums=(460, 420), fallback=(760, 640)
         )
         # The score summary may be collapsed internally, so it only needs a
         # compact minimum allocation at the splitter level.
@@ -1592,6 +2003,7 @@ class RubricGrader(QMainWindow):
             self.assessments_dir = os.path.abspath(directory)
             self.assessment_folder_label.setText(self.assessments_dir)
             self._configure_submission_evidence_root()
+            self._load_persisted_reference_solution()
             assessment_records = load_students_from_assessment_dir(self.assessments_dir)
             if self.roster_records:
                 self.student_records = merge_student_records(
@@ -1699,6 +2111,7 @@ class RubricGrader(QMainWindow):
                 self.assessments_dir = parent
                 self.assessment_folder_label.setText(parent)
                 self._configure_submission_evidence_root()
+                self._load_persisted_reference_solution()
                 return True
 
         if not allow_prompt:
@@ -1716,6 +2129,7 @@ class RubricGrader(QMainWindow):
         self.assessments_dir = os.path.abspath(directory)
         self.assessment_folder_label.setText(self.assessments_dir)
         self._configure_submission_evidence_root()
+        self._load_persisted_reference_solution()
         for record in self.student_records:
             if not record.assessment_path:
                 record.assessment_path = assessment_path_for_student(record, self.assessments_dir)
@@ -2470,6 +2884,8 @@ class RubricGrader(QMainWindow):
         batch_export_assessments(self)
 
     def _finalize_window_close(self):
+        if self._workspace_popout_dialog is not None:
+            self._reattach_grading_workspace(close_dialog=True)
         self._save_ui_preferences()
         for worker in list(self._submission_workers.values()):
             try:

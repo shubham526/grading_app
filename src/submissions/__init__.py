@@ -54,6 +54,13 @@ from .pdf import (
     render_pdf_pages,
 )
 from .splitter import FULL_SUBMISSION, normalize_heading_question_id, split_answers_by_question
+from .reference_solution import (
+    REFERENCE_SOLUTION_DIRNAME,
+    ReferenceSolution,
+    load_reference_solution,
+    prepare_reference_solution,
+    reference_solution_root,
+)
 from .storage import (
     EVIDENCE_SCHEMA_VERSION,
     EXTRACTED_ANSWERS_FILENAME,
@@ -76,6 +83,8 @@ from .storage import (
 from .transcription import (
     DEFAULT_HANDWRITING_MODEL,
     DEFAULT_KEEP_ALIVE,
+    DEFAULT_MODEL_LOAD_TIMEOUT,
+    DEFAULT_INFERENCE_TIMEOUT,
     DEFAULT_NUM_CTX,
     DEFAULT_NUM_PREDICT,
     DEFAULT_OLLAMA_URL,
@@ -99,6 +108,8 @@ __all__ = [
     "CompilationResult",
     "DEFAULT_HANDWRITING_MODEL",
     "DEFAULT_KEEP_ALIVE",
+    "DEFAULT_INFERENCE_TIMEOUT",
+    "DEFAULT_MODEL_LOAD_TIMEOUT",
     "DEFAULT_MAX_PAGE_PIXELS",
     "DEFAULT_MAX_PDF_BYTES",
     "DEFAULT_MAX_PDF_PAGES",
@@ -167,4 +178,9 @@ __all__ = [
     "strip_latex_comment",
     "transcribe_page_images",
     "transcription_cache_key",
+    "REFERENCE_SOLUTION_DIRNAME",
+    "ReferenceSolution",
+    "load_reference_solution",
+    "prepare_reference_solution",
+    "reference_solution_root",
 ]

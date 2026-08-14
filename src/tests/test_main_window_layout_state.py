@@ -1,4 +1,4 @@
-"""Structural tests for Commit-5 responsive layout and preference persistence."""
+"""Structural tests for Commit-5 responsive Gradescope-style layout."""
 
 from __future__ import annotations
 
@@ -38,48 +38,102 @@ class TestMainWindowLayoutState(unittest.TestCase):
         self.assertIn("setMinimumSize(900, 600)", init)
         self.assertIn("resize(1400, 900)", init)
 
-    def test_outer_workspace_is_vertical_splitter(self):
+    def test_upper_context_and_work_area_use_vertical_splitter(self):
         source = _segment("init_ui")
-        self.assertIn("self.workspace_splitter = QSplitter(Qt.Vertical)", source)
+        self.assertIn("self.session_workspace_splitter = PersistentGripSplitter(Qt.Vertical)", source)
+        self.assertIn("self.session_workspace_splitter.addWidget(self.session_scroll)", source)
+        self.assertIn("self.session_workspace_splitter.addWidget(self.workspace_host)", source)
+        self.assertIn("self.session_workspace_splitter.setChildrenCollapsible(False)", source)
+        self.assertIn("self.session_workspace_splitter.setHandleWidth(12)", source)
+        self.assertIn("self.session_workspace_splitter.setSizes([235, 665])", source)
+
+    def test_upper_context_is_scrollable_when_compressed(self):
+        source = _segment("init_ui")
+        self.assertIn("self.session_scroll = QScrollArea()", source)
+        self.assertIn("self.session_scroll.setWidgetResizable(True)", source)
+        self.assertIn("self.session_scroll.setWidget(self.session_panel)", source)
+
+    def test_primary_workspace_is_horizontal_submission_and_grading_split(self):
+        source = _segment("init_ui")
+        self.assertIn("self.workspace_splitter = PersistentGripSplitter(Qt.Horizontal)", source)
         self.assertIn("self.workspace_splitter.addWidget(self.submission_workspace)", source)
         self.assertIn("self.workspace_splitter.addWidget(self.grading_workspace)", source)
         self.assertIn("self.workspace_splitter.setChildrenCollapsible(False)", source)
+        self.assertIn("self.workspace_splitter.setHandleWidth(12)", source)
 
-    def test_grading_area_retains_independent_summary_splitter(self):
+    def test_splitters_use_persistent_custom_grip_handle(self):
+        self.assertIn("class GripSplitterHandle(QSplitterHandle)", _SOURCE)
+        self.assertIn("class PersistentGripSplitter(QSplitter)", _SOURCE)
+        self.assertIn('self.setToolTip("Drag to resize")', _SOURCE)
+        self.assertIn('QColor("#667085")', _SOURCE)
+        self.assertIn("createHandle", _SOURCE)
+
+    def test_submission_and_grading_have_useful_minimum_widths(self):
         source = _segment("init_ui")
-        self.assertIn("self.main_splitter = QSplitter(Qt.Vertical)", source)
+        self.assertIn("self.submission_workspace.setMinimumWidth(460)", source)
+        self.assertIn("self.grading_workspace.setMinimumWidth(420)", source)
+        self.assertIn("self.workspace_splitter.setSizes([760, 640])", source)
+
+    def test_grading_area_retains_independent_vertical_summary_splitter(self):
+        source = _segment("init_ui")
+        self.assertIn("self.main_splitter = PersistentGripSplitter(Qt.Vertical)", source)
         self.assertIn("self.main_splitter.addWidget(self.scroll_area)", source)
         self.assertIn("self.main_splitter.addWidget(self.summary_container)", source)
+        self.assertIn("self.main_splitter.setChildrenCollapsible(False)", source)
 
-    def test_submission_workspace_owns_independent_horizontal_splitter(self):
-        workspace_path = _REPO_ROOT / "src" / "ui" / "widgets" / "submission_workspace.py"
-        workspace_source = workspace_path.read_text(encoding="utf-8")
-        self.assertIn("self.splitter = QSplitter(Qt.Horizontal", workspace_source)
-        self.assertIn("toggle_document_panel", workspace_source)
-        self.assertIn("toggle_text_panel", workspace_source)
+    def test_question_summary_still_exists_and_is_collapsible(self):
+        source = _segment("init_ui")
+        self.assertIn('"Question Scores Summary", collapsible=True, initially_collapsed=True', source)
+        self.assertIn("self.question_summary_layout", source)
 
-    def test_ui_preferences_save_geometry_and_all_three_splitter_states(self):
+    def test_question_summary_show_hide_resizes_summary_pane(self):
+        source = _segment("_on_question_summary_collapsed_changed")
+        self.assertIn("summary_height = 58", source)
+        self.assertIn("summary_height = min(280, max(190, total // 3))", source)
+        self.assertIn("splitter.setSizes([criteria_height, summary_height])", source)
+        init = _segment("init_ui")
+        self.assertIn("question_summary_card.collapsed_changed.connect", init)
+
+    def test_grading_pane_has_compact_question_aware_heading(self):
+        source = _segment("init_ui")
+        self.assertIn('self.grading_pane_title = QLabel("Grading"', source)
+        notify = _segment("_notify_submission_context_changed")
+        self.assertIn('self.grading_pane_title.setText(f"Grading — {self.current_question_id}")', notify)
+
+    def test_submission_workspace_no_longer_persists_internal_text_splitter(self):
+        workspace_source = (_REPO_ROOT / "src" / "ui" / "widgets" / "submission_workspace.py").read_text(encoding="utf-8")
+        self.assertNotIn("self.splitter = QSplitter", workspace_source)
+        self.assertNotIn("SubmissionTextPanel", workspace_source)
+
+    def test_ui_preferences_save_all_three_splitter_states(self):
         source = _segment("_save_ui_preferences")
         self.assertIn("saveGeometry()", source)
+        self.assertIn("session_workspace_splitter.saveState()", source)
         self.assertIn("workspace_splitter.saveState()", source)
         self.assertIn("main_splitter.saveState()", source)
-        self.assertIn("submission_workspace.splitter.saveState()", source)
+        self.assertIn("question_summary_card.is_collapsed()", source)
         self.assertIn("isMaximized()", source)
 
-    def test_ui_preferences_restore_geometry_and_all_three_splitter_states(self):
+    def test_restore_enforces_splitter_orientations_after_saved_state(self):
         source = _segment("_restore_ui_preferences")
-        self.assertIn("restoreGeometry", source)
+        self.assertIn("session_workspace_splitter.restoreState", source)
         self.assertIn("workspace_splitter.restoreState", source)
         self.assertIn("main_splitter.restoreState", source)
-        self.assertIn("submission_workspace.splitter.restoreState", source)
-        self.assertIn("Qt.WindowMaximized", source)
+        self.assertIn("self.session_workspace_splitter.setOrientation(Qt.Vertical)", source)
+        self.assertIn("self.workspace_splitter.setOrientation(Qt.Horizontal)", source)
+        self.assertIn("self.main_splitter.setOrientation(Qt.Vertical)", source)
+
+    def test_workspace_uses_versioned_settings_key_to_ignore_legacy_orientation(self):
+        self.assertIn('_UI_WORKSPACE_SPLITTER_KEY = "workspace_splitter_horizontal_v2"', _SOURCE)
+        self.assertIn('_UI_SESSION_SPLITTER_KEY = "session_workspace_splitter_v2"', _SOURCE)
 
     def test_preferences_are_restored_after_widgets_exist(self):
         init = _segment("__init__")
         self.assertLess(init.index("self.init_ui()"), init.index("self._restore_ui_preferences()"))
 
-    def test_close_path_persists_layout_and_cancels_background_requests(self):
+    def test_close_path_reattaches_popout_then_persists(self):
         finalize = _segment("_finalize_window_close")
+        self.assertIn("_reattach_grading_workspace", finalize)
         self.assertIn("_save_ui_preferences()", finalize)
         self.assertIn("worker.cancel()", finalize)
         close = _segment("closeEvent")
@@ -100,18 +154,12 @@ class TestMainWindowLayoutState(unittest.TestCase):
         self.assertIn("adjustSize()", stabilizer)
         self.assertIn("sizeHint().height()", stabilizer)
 
-    def test_vertical_splitters_cannot_accidentally_collapse_primary_workspaces(self):
-        source = _segment("init_ui")
-        self.assertIn("self.workspace_splitter.setChildrenCollapsible(False)", source)
-        self.assertIn("self.main_splitter.setChildrenCollapsible(False)", source)
-        self.assertIn("initially_collapsed=True", source)
-
-    def test_restored_zero_sized_splitters_are_normalized(self):
-        restore = _segment("_restore_ui_preferences")
-        self.assertIn("_ensure_usable_splitter_sizes", restore)
-        normalize = _segment("_normalize_splitter_sizes")
-        self.assertIn("splitter.setSizes", normalize)
-        self.assertIn("minimums", normalize)
+    def test_restored_bad_splitter_sizes_are_normalized_for_both_axes(self):
+        ensure = _segment("_ensure_usable_splitter_sizes")
+        self.assertIn("minimums=(140, 320)", ensure)
+        self.assertIn("fallback=(235, 665)", ensure)
+        self.assertIn("minimums=(460, 420)", ensure)
+        self.assertIn("fallback=(760, 640)", ensure)
 
     def test_primary_toolbar_groups_reports_and_settings_in_menus(self):
         source = _segment("init_ui")
@@ -120,15 +168,6 @@ class TestMainWindowLayoutState(unittest.TestCase):
         self.assertIn("QToolButton.InstantPopup", source)
         self.assertIn("Submission & AI Settings", source)
 
-
-    def test_submission_gets_priority_in_default_vertical_split(self):
-        source = _segment("init_ui")
-        self.assertIn("self.submission_workspace.setMinimumHeight(320)", source)
-        self.assertIn("self.workspace_splitter.setStretchFactor(0, 6)", source)
-        self.assertIn("self.workspace_splitter.setStretchFactor(1, 4)", source)
-        self.assertIn("self.workspace_splitter.setSizes([520, 320])", source)
-        self.assertIn("self.workspace_splitter.setHandleWidth(10)", source)
-
     def test_grading_summary_is_collapsible_and_collapsed_by_default(self):
         source = _segment("init_ui")
         self.assertIn(
@@ -136,20 +175,29 @@ class TestMainWindowLayoutState(unittest.TestCase):
             source,
         )
 
-    def test_layout_preferences_include_compact_top_sections(self):
-        save = _segment("_save_ui_preferences")
-        restore = _segment("_restore_ui_preferences")
-        self.assertIn("_UI_GRADING_CARD_COLLAPSED_KEY", save)
-        self.assertIn("_UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY", save)
-        self.assertIn("grading_card_collapsed", restore)
-        self.assertIn("attempted_questions_visible", restore)
-
-    def test_focus_mode_hides_grading_and_restores_splitter(self):
+    def test_focus_mode_temporarily_hides_context_and_right_grading_pane(self):
         source = _segment("_on_submission_focus_requested")
+        self.assertIn("self.session_scroll.setVisible(False)", source)
         self.assertIn("self.grading_workspace.setVisible(False)", source)
+        self.assertIn("self.session_scroll.setVisible(True)", source)
         self.assertIn("self.grading_workspace.setVisible(True)", source)
-        self.assertIn("self._workspace_sizes_before_focus", source)
-        self.assertIn("self.workspace_splitter.setSizes(sizes)", source)
+        self.assertIn("self._session_sizes_before_focus", source)
+
+    def test_popout_reparents_exact_horizontal_workspace_not_a_copy(self):
+        popout = _segment("_pop_out_grading_workspace")
+        self.assertIn("self.workspace_host_layout.removeWidget(self.workspace_splitter)", popout)
+        self.assertIn("self.workspace_splitter.setParent(dialog)", popout)
+        self.assertIn("dialog_layout.addWidget(self.workspace_splitter, 1)", popout)
+        self.assertNotIn("SubmissionWorkspace(dialog", popout)
+        reattach = _segment("_reattach_grading_workspace")
+        self.assertIn("self.workspace_splitter.setParent(self.workspace_host)", reattach)
+        self.assertIn("self.workspace_host_layout.insertWidget(0, self.workspace_splitter)", reattach)
+
+    def test_popout_has_navigation_save_and_reattach_controls(self):
+        popout = _segment("_pop_out_grading_workspace")
+        for label in ("Previous Question", "Next Question", "Previous Student", "Next Student", "Save", "Reattach"):
+            self.assertIn(label, popout)
+        self.assertIn("save_and_next_student", popout)
 
 
 if __name__ == "__main__":

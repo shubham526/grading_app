@@ -1,10 +1,12 @@
 """Reusable neutral card/section widget for the grading UI."""
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 
 class CardWidget(QFrame):
+    collapsed_changed = pyqtSignal(bool)
+
     """Subtle bordered section with a compact title row and content area.
 
     This preserves the existing ``get_content_layout()`` API used throughout
@@ -42,7 +44,7 @@ class CardWidget(QFrame):
 
         self.collapse_button = QToolButton(self.header)
         self.collapse_button.setObjectName("sectionCardCollapseButton")
-        self.collapse_button.setAutoRaise(True)
+        self.collapse_button.setAutoRaise(False)
         self.collapse_button.setCursor(Qt.PointingHandCursor)
         self.collapse_button.clicked.connect(self.toggle_collapsed)
         self.collapse_button.setVisible(self.collapsible)
@@ -87,16 +89,20 @@ class CardWidget(QFrame):
                 border: none;
             }
             QToolButton#sectionCardCollapseButton {
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-                color: #667085;
-                padding: 3px 6px;
-                min-width: 22px;
+                background: #F8FAFC;
+                border: 1px solid #D9DEE7;
+                border-radius: 6px;
+                color: #344054;
+                padding: 5px 10px;
+                min-width: 64px;
+                min-height: 24px;
+                font-size: 12px;
+                font-weight: 600;
             }
             QToolButton#sectionCardCollapseButton:hover {
-                background-color: #F2F4F7;
-                color: #1F2937;
+                background-color: #EEF2FF;
+                border-color: #AEBBEF;
+                color: #304DAF;
             }
             """
         )
@@ -121,18 +127,22 @@ class CardWidget(QFrame):
     def set_collapsed(self, collapsed):
         if not self.collapsible and collapsed:
             return
-        self._collapsed = bool(collapsed)
+        collapsed = bool(collapsed)
+        changed = collapsed != self._collapsed
+        self._collapsed = collapsed
         self.content.setVisible(not self._collapsed)
         self.header_divider.setVisible(not self._collapsed)
         self._update_collapse_button()
+        if changed:
+            self.collapsed_changed.emit(self._collapsed)
 
     def toggle_collapsed(self):
         self.set_collapsed(not self._collapsed)
 
     def _update_collapse_button(self):
         if self._collapsed:
-            self.collapse_button.setText("▸")
-            self.collapse_button.setToolTip(f"Expand {self.title}")
+            self.collapse_button.setText("Show ▼")
+            self.collapse_button.setToolTip(f"Show {self.title}")
         else:
-            self.collapse_button.setText("▾")
-            self.collapse_button.setToolTip(f"Collapse {self.title}")
+            self.collapse_button.setText("Hide ▲")
+            self.collapse_button.setToolTip(f"Hide {self.title}")

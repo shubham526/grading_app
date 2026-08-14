@@ -103,6 +103,48 @@ class TestOllamaBackend(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.error_code, "model_load_failure")
 
+    def test_model_load_timeout_is_distinct_and_allows_long_cold_start(self):
+        backend = OllamaTranscriptionBackend(warm_model=True)
+        observed = {}
+
+        def request(method, endpoint, *, payload=None, timeout=None):
+            if endpoint == "/tags":
+                return {"models": [{"name": DEFAULT_HANDWRITING_MODEL}]}
+            if endpoint == "/show":
+                return {"capabilities": ["vision"]}
+            if endpoint == "/generate":
+                observed["timeout"] = timeout
+                raise _OllamaRequestError("ollama_timeout", "timed out")
+            raise AssertionError(endpoint)
+
+        with mock.patch.object(backend, "_json_request", side_effect=request):
+            result = backend.preflight(force=True)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "model_load_timeout")
+        self.assertEqual(observed["timeout"], 600.0)
+        self.assertIn("GPU may be busy", result.error_message)
+
+    def test_inference_timeout_is_distinct_from_model_load_failure(self):
+        backend = OllamaTranscriptionBackend(warm_model=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            image = _image_file(tmp)
+
+            def request(method, endpoint, *, payload=None, timeout=None):
+                if endpoint == "/tags":
+                    return {"models": [{"name": DEFAULT_HANDWRITING_MODEL}]}
+                if endpoint == "/show":
+                    return {"capabilities": ["vision"]}
+                if endpoint == "/chat":
+                    self.assertEqual(timeout, 300.0)
+                    raise _OllamaRequestError("ollama_timeout", "timed out")
+                raise AssertionError(endpoint)
+
+            with mock.patch.object(backend, "_json_request", side_effect=request):
+                result = backend.transcribe_page(image)
+        self.assertEqual(result.status, TranscriptionStatus.INFERENCE_FAILURE)
+        self.assertEqual(result.warning, "inference_timeout")
+        self.assertIn("300", result.metadata["error_message"])
+
     def test_success_uses_benchmark_generation_settings(self):
         capture = {}
         backend = OllamaTranscriptionBackend()

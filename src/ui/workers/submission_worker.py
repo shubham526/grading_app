@@ -24,6 +24,7 @@ from PyQt5.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 from src.submissions import (
     DEFAULT_HANDWRITING_MODEL,
     OllamaTranscriptionBackend,
+    prepare_reference_solution,
 )
 from src.ui.submission_controller import SubmissionController
 
@@ -36,6 +37,7 @@ class SubmissionOperation(str, Enum):
     GENERATE_TRANSCRIPTION = "generate_transcription"
     REFRESH_TRANSCRIPTION = "refresh_transcription"
     TEST_OLLAMA = "test_ollama"
+    LOAD_REFERENCE_SOLUTION = "load_reference_solution"
 
 
 def new_request_id() -> str:
@@ -123,7 +125,10 @@ class SubmissionWorker(QRunnable):
         self._cancel_event = threading.Event()
         self.setAutoDelete(True)
 
-        if self.operation != SubmissionOperation.TEST_OLLAMA and self.controller is None:
+        if self.operation not in {
+            SubmissionOperation.TEST_OLLAMA,
+            SubmissionOperation.LOAD_REFERENCE_SOLUTION,
+        } and self.controller is None:
             raise ValueError(f"controller is required for operation {self.operation.value!r}")
         if self.operation in {
             SubmissionOperation.LOAD_PDF_ACCOMMODATION,
@@ -203,6 +208,8 @@ class SubmissionWorker(QRunnable):
             return self._load_pdf_accommodation(transcribe=True, refresh=True)
         if self.operation == SubmissionOperation.TEST_OLLAMA:
             return self._test_ollama()
+        if self.operation == SubmissionOperation.LOAD_REFERENCE_SOLUTION:
+            return self._load_reference_solution()
         raise AssertionError(f"Unhandled operation: {self.operation!r}")
 
     def _load_normal_submissions(self) -> Any:
@@ -236,15 +243,19 @@ class SubmissionWorker(QRunnable):
                 if model:
                     backend_kwargs["model"] = str(model)
                 backend = self.backend_factory(**backend_kwargs)
+
+            if hasattr(backend, "set_progress_callback"):
+                backend.set_progress_callback(self._emit_progress)
+            self._emit_progress(
+                "Refreshing assistive transcription…"
+                if refresh
+                else "Checking transcription cache…"
+            )
+
             parameters["transcription_backend"] = backend
             parameters["transcribe_handwriting"] = True
             # Generate is cache-first; Refresh explicitly performs a new pass.
             parameters["reuse_cached_transcription"] = not refresh
-            self._emit_progress(
-                "Refreshing assistive transcription…"
-                if refresh
-                else "Generating assistive transcription…"
-            )
         else:
             # Loading/rendering an explicit accommodation must never silently
             # trigger VLM inference.
@@ -266,11 +277,35 @@ class SubmissionWorker(QRunnable):
         backend_kwargs: Dict[str, Any] = {"model": str(model)}
         if base_url:
             backend_kwargs["base_url"] = str(base_url)
-        # Keep production defaults authoritative.  The UI exposes only endpoint
-        # and model; test code may inject a fake factory.
-        self._emit_progress("Testing Ollama connection…")
-        backend = self.backend_factory(**backend_kwargs)
+        # Connection testing should be fast and non-disruptive.  It verifies the
+        # server, installed model, and advertised vision capability without
+        # cold-loading a 31B model onto a possibly busy shared GPU.
+        backend_kwargs["warm_model"] = False
+        self._emit_progress("Testing Ollama connection and model availability…")
+        try:
+            backend = self.backend_factory(**backend_kwargs)
+        except TypeError:
+            # Minimal injected test doubles from older tests may not accept the
+            # production-only warm_model keyword.
+            backend_kwargs.pop("warm_model", None)
+            backend = self.backend_factory(**backend_kwargs)
         return backend.preflight(force=True)
+
+    def _load_reference_solution(self) -> Any:
+        parameters = dict(self.parameters)
+        source_path = parameters.pop("source_path", None)
+        assessments_dir = parameters.pop("assessments_dir", None)
+        question_ids = parameters.pop("question_ids", None)
+        if not source_path:
+            raise ValueError("source_path is required for reference-solution loading")
+        if not assessments_dir:
+            raise ValueError("assessments_dir is required for reference-solution loading")
+        self._emit_progress("Preparing reference solution…")
+        return prepare_reference_solution(
+            str(source_path),
+            str(assessments_dir),
+            question_ids=question_ids,
+        )
 
 
 __all__ = [

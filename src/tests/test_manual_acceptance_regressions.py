@@ -73,7 +73,7 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
 
     def test_question_mode_has_gap_before_questions_attempted_group(self):
         source = _segment("init_ui")
-        self.assertIn("main_layout.addSpacing(6)", source)
+        self.assertIn("session_layout.addSpacing(6)", source)
 
     def test_light_theme_forces_fusion_and_legible_editors(self):
         source = _STYLE_PATH.read_text(encoding="utf-8")
@@ -107,7 +107,7 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
 
     def test_grades_and_evidence_folder_label_is_unambiguous(self):
         source = _segment("init_ui")
-        self.assertIn('QPushButton("Grades & Evidence Folder")', source)
+        self.assertIn('QPushButton("Grades + Evidence Folder")', source)
         self.assertIn("assessment JSON files and persistent submission evidence", source)
 
     def test_small_rubric_clamps_stale_generic_fixed_total(self):
@@ -122,6 +122,23 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
         self.assertIn("self.attempted_questions_button.setChecked(False)", source)
         toggle = _segment("_set_questions_attempted_visible")
         self.assertIn("question_selection_group.setVisible", toggle)
+
+    def test_upper_context_and_grading_workspace_have_draggable_vertical_divider(self):
+        source = _segment("init_ui")
+        self.assertIn("session_workspace_splitter = PersistentGripSplitter(Qt.Vertical)", source)
+        self.assertIn("session_workspace_splitter.setHandleWidth(12)", source)
+        self.assertIn("session_workspace_splitter.setSizes([235, 665])", source)
+
+    def test_question_summary_collapse_control_is_persisted(self):
+        save = _segment("_save_ui_preferences")
+        restore = _segment("_restore_ui_preferences")
+        self.assertIn("question_summary_card.is_collapsed()", save)
+        self.assertIn("question_summary_card.set_collapsed(question_summary_collapsed)", restore)
+
+    def test_whole_workspace_popout_is_wired_from_submission_toolbar(self):
+        source = _segment("init_ui")
+        self.assertIn("popout_workspace_requested.connect", source)
+        self.assertIn("self._pop_out_grading_workspace", source)
 
 
 if __name__ == "__main__":

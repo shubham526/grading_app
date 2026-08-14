@@ -3,22 +3,15 @@
 No real Ollama server or GPU is required; worker dependencies are injected.
 """
 
-import os
 import unittest
 from unittest.mock import Mock
 
-# This test module may run before real QWidget tests during unittest discovery.
-# Use QApplication (not QCoreApplication) so the process remains capable of
-# constructing widgets later in the same test run. A QCoreApplication cannot
-# be upgraded to QApplication after it has been created.
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 try:
     import PyQt5
-    from PyQt5.QtWidgets import QApplication
-    _QT_AVAILABLE = not isinstance(PyQt5, Mock) and not isinstance(QApplication, Mock)
+    from PyQt5.QtCore import QCoreApplication
+    _QT_AVAILABLE = not isinstance(PyQt5, Mock) and not isinstance(QCoreApplication, Mock)
 except (ImportError, ModuleNotFoundError):
-    QApplication = None
+    QCoreApplication = None
     _QT_AVAILABLE = False
 
 
@@ -26,7 +19,7 @@ except (ImportError, ModuleNotFoundError):
 class TestSubmissionWorker(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
 
     def _capture(self, worker):
         events = {"started": [], "progress": [], "completed": [], "failed": [], "cancelled": [], "finished": []}
@@ -160,7 +153,14 @@ class TestSubmissionWorker(unittest.TestCase):
         )
         events = self._capture(worker)
         worker.run()
-        self.assertEqual(built[0][0], {"base_url": "http://127.0.0.1:11435", "model": "gemma4:31b"})
+        self.assertEqual(
+            built[0][0],
+            {
+                "base_url": "http://127.0.0.1:11435",
+                "model": "gemma4:31b",
+                "warm_model": False,
+            },
+        )
         self.assertTrue(built[0][1].force)
         self.assertEqual(events["completed"][0][3], {"ok": True})
 

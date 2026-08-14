@@ -58,6 +58,7 @@ class TestSubmissionWorkerWiring(unittest.TestCase):
         source = _segment("_submission_request_is_latest")
         self.assertIn("_latest_folder_request_id", source)
         self.assertIn("_latest_connection_request_id", source)
+        self.assertIn("_latest_reference_request_id", source)
         self.assertIn("_latest_request_by_student", source)
         self.assertIn("canonical_student_id", source)
 
@@ -83,6 +84,14 @@ class TestSubmissionWorkerWiring(unittest.TestCase):
         source = _segment("_on_submission_worker_completed")
         self.assertIn("SubmissionOperation.TEST_OLLAMA.value", source)
         self.assertIn("set_connection_test_result", source)
+
+    def test_reference_solution_uses_background_worker(self):
+        source = _segment("load_reference_solution_file")
+        self.assertIn("SubmissionOperation.LOAD_REFERENCE_SOLUTION", source)
+        self.assertIn("question_ids", source)
+        completed = _segment("_on_submission_worker_completed")
+        self.assertIn("self.reference_solution = payload", completed)
+        self.assertIn("set_reference_solution(payload)", completed)
 
     def test_worker_failures_do_not_open_modal_error_dialogs(self):
         source = _segment("_on_submission_worker_failed")
