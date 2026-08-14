@@ -31,14 +31,27 @@ from .export import (
 )
 from .embedding_provider import EmbeddingProvider
 from .embeddings import (
+    DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD,
+    DEFAULT_EMBEDDING_THRESHOLDS,
+    DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD,
+    compute_question_embedding_similarity,
     cosine_similarity,
     default_embedding_cache_dir,
     embedding_cache_key,
+    embedding_flag_for_score,
+    embedding_review_warnings,
     get_embeddings,
     load_cached_embedding,
+    resolve_embedding_thresholds,
     save_cached_embedding,
 )
 from .mock_embedding_provider import MockEmbeddingProvider
+from .sentence_transformer_provider import (
+    DEFAULT_SENTENCE_TRANSFORMER_MODEL,
+    SentenceTransformerEmbeddingProvider,
+    SentenceTransformerUnavailableError,
+    sentence_transformers_available,
+)
 from .highlight import find_shared_spans, render_side_by_side_html
 from .hashing import compute_file_sha256, compute_text_sha256
 from .models import (
@@ -66,7 +79,18 @@ __all__ = [
     "SimilarityReport",
     "EmbeddingProvider",
     "MockEmbeddingProvider",
+    "DEFAULT_SENTENCE_TRANSFORMER_MODEL",
+    "SentenceTransformerEmbeddingProvider",
+    "SentenceTransformerUnavailableError",
+    "sentence_transformers_available",
+    "DEFAULT_EMBEDDING_THRESHOLDS",
+    "DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD",
+    "DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD",
+    "compute_question_embedding_similarity",
     "cosine_similarity",
+    "embedding_flag_for_score",
+    "embedding_review_warnings",
+    "resolve_embedding_thresholds",
     "default_embedding_cache_dir",
     "embedding_cache_key",
     "get_embeddings",

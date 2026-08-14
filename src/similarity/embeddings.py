@@ -1,9 +1,9 @@
-"""Embedding primitives and on-disk cache for advanced similarity review.
+"""Embedding primitives, scoring, and on-disk cache for advanced similarity review.
 
-This module contains no dependency on SentenceTransformers or any other real
-embedding backend.  It operates only on the :class:`EmbeddingProvider`
-interface, keeping v2.3.1 offline-testable and allowing production providers
-to be installed optionally.
+The module depends only on :class:`EmbeddingProvider`; the heavy production
+backend remains optional.  Question-level scoring compares only matching
+question IDs and batches each unique student/question text once before cheap
+pairwise cosine comparisons.
 """
 
 from __future__ import annotations
@@ -14,15 +14,31 @@ import math
 import os
 import sys
 import tempfile
+from itertools import combinations
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from .embedding_provider import EmbeddingProvider
 from .hashing import compute_text_sha256
+from .shingles import tokenize_for_similarity
 
 
 _CACHE_SCHEMA_VERSION = 1
 _CACHE_DIRECTORY_NAME = "similarity_embeddings"
+
+DEFAULT_EMBEDDING_THRESHOLDS: dict[str, float] = {
+    "embedding_medium": 0.88,
+    "embedding_high": 0.93,
+    "embedding_exact": 0.98,
+}
+
+DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD = 0.50
+DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD = 30
+
+
+# ---------------------------------------------------------------------------
+# Existing Commit-1 provider/cache primitives
+# ---------------------------------------------------------------------------
 
 
 def _validate_provider_identity(provider: EmbeddingProvider) -> tuple[str, str]:
@@ -46,16 +62,7 @@ def _validate_embedding(vector: Sequence[float]) -> list[float]:
 
 
 def cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
-    """Return non-negative cosine similarity in the inclusive range [0, 1].
-
-    Empty or zero-norm vectors yield 0.0.  Dimension mismatches are treated as
-    invalid provider output and raise ``ValueError`` rather than silently
-    truncating vectors with ``zip``.
-
-    Raw negative cosine values are clamped to 0.0.  Positive cosine values are
-    left on their ordinary scale, which keeps future model-specific thresholds
-    interpretable while still presenting a non-negative review signal.
-    """
+    """Return non-negative cosine similarity in the inclusive range [0, 1]."""
     a = _validate_embedding(vec_a)
     b = _validate_embedding(vec_b)
 
@@ -73,7 +80,6 @@ def cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
         return 0.0
 
     raw = sum(left * right for left, right in zip(a, b)) / (norm_a * norm_b)
-    # Floating-point arithmetic can produce tiny excursions outside [-1, 1].
     raw = max(-1.0, min(1.0, raw))
     return max(0.0, raw)
 
@@ -226,12 +232,7 @@ def get_embeddings(
     cache_enabled: bool = True,
     cache_dir: str | Path | None = None,
 ) -> list[list[float]]:
-    """Return embeddings in input order, batching only uncached unique texts.
-
-    Identical texts are embedded once per call.  With caching enabled, only
-    cache misses are sent to the provider, and newly computed vectors are saved
-    under keys containing the exact text hash, provider, and model identity.
-    """
+    """Return embeddings in input order, batching only uncached unique texts."""
     if isinstance(texts, (str, bytes)):
         raise TypeError("texts must be a sequence of strings, not one string.")
 
@@ -284,3 +285,193 @@ def get_embeddings(
                 )
 
     return [list(vectors_by_text[text]) for text in ordered_texts]
+
+
+# ---------------------------------------------------------------------------
+# v2.3.1 question-level semantic scoring
+# ---------------------------------------------------------------------------
+
+
+def resolve_embedding_thresholds(
+    thresholds: Mapping[str, Any] | None = None,
+) -> dict[str, float]:
+    """Resolve and validate configurable embedding review thresholds."""
+
+    merged = dict(DEFAULT_EMBEDDING_THRESHOLDS)
+    if thresholds is not None:
+        unknown = set(thresholds) - set(DEFAULT_EMBEDDING_THRESHOLDS)
+        if unknown:
+            raise ValueError(
+                "Unsupported embedding threshold key(s): "
+                + ", ".join(sorted(str(item) for item in unknown))
+            )
+        for key, value in thresholds.items():
+            merged[key] = float(value)
+
+    values = [
+        merged["embedding_medium"],
+        merged["embedding_high"],
+        merged["embedding_exact"],
+    ]
+    if any(value < 0.0 or value > 1.0 for value in values):
+        raise ValueError("Embedding thresholds must be between 0.0 and 1.0.")
+    if values != sorted(values):
+        raise ValueError(
+            "Embedding thresholds must satisfy medium <= high <= exact."
+        )
+    return merged
+
+
+def embedding_flag_for_score(
+    score: float,
+    thresholds: Mapping[str, Any] | None = None,
+) -> str:
+    """Map one cosine score to a conservative semantic review flag."""
+
+    value = float(score)
+    if not math.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError("Embedding similarity score must be between 0.0 and 1.0.")
+
+    resolved = resolve_embedding_thresholds(thresholds)
+    if value >= resolved["embedding_exact"]:
+        return "exact"
+    if value >= resolved["embedding_high"]:
+        return "high"
+    if value >= resolved["embedding_medium"]:
+        return "medium"
+    return "none"
+
+
+def embedding_review_warnings(
+    answer_a: str,
+    answer_b: str,
+    score: float,
+    *,
+    ngram_score: float | None = None,
+    thresholds: Mapping[str, Any] | None = None,
+    short_answer_token_threshold: int = DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD,
+    low_textual_overlap_threshold: float = DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD,
+) -> list[str]:
+    """Return instructor-review warnings for potentially ambiguous semantic flags."""
+
+    if short_answer_token_threshold <= 0:
+        raise ValueError("short_answer_token_threshold must be positive.")
+    if not 0.0 <= float(low_textual_overlap_threshold) <= 1.0:
+        raise ValueError("low_textual_overlap_threshold must be between 0.0 and 1.0.")
+
+    flag = embedding_flag_for_score(score, thresholds)
+    if flag not in {"high", "exact"}:
+        return []
+
+    warnings: list[str] = []
+    if ngram_score is not None and float(ngram_score) < float(low_textual_overlap_threshold):
+        warnings.append("high_semantic_similarity_low_textual_overlap")
+
+    tokens_a = tokenize_for_similarity(str(answer_a or ""))
+    tokens_b = tokenize_for_similarity(str(answer_b or ""))
+    if (
+        len(tokens_a) < short_answer_token_threshold
+        or len(tokens_b) < short_answer_token_threshold
+    ):
+        warnings.append("short_answer_embedding_unreliable")
+
+    return warnings
+
+
+def _clean_question_ids(question_ids: Sequence[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in question_ids:
+        question_id = str(raw or "").strip()
+        if question_id and question_id not in seen:
+            seen.add(question_id)
+            cleaned.append(question_id)
+    return cleaned
+
+
+def compute_question_embedding_similarity(
+    answers_by_student: Mapping[str, Mapping[str, str]],
+    question_ids: Sequence[str],
+    provider: EmbeddingProvider,
+    *,
+    cache_enabled: bool = True,
+    cache_dir: str | Path | None = None,
+) -> dict[tuple[str, str], dict[str, float]]:
+    """Compute same-question semantic similarity for every unique student pair.
+
+    Each non-empty student/question answer is embedded at most once in the
+    batch.  The resulting vectors are then reused for all pairwise cosine
+    comparisons.  Missing or blank answers are omitted rather than represented
+    as a misleading zero-similarity signal.
+    """
+
+    if not isinstance(answers_by_student, Mapping):
+        raise TypeError("answers_by_student must be a mapping.")
+
+    normalized_students: dict[str, Mapping[str, str]] = {}
+    for raw_student_id, raw_answers in answers_by_student.items():
+        student_id = str(raw_student_id or "").strip()
+        if not student_id:
+            raise ValueError("Student IDs for embedding comparison must be non-empty.")
+        if student_id in normalized_students:
+            raise ValueError(f"Duplicate student ID after normalization: {student_id!r}")
+        if not isinstance(raw_answers, Mapping):
+            raise TypeError(
+                f"Answers for student {student_id!r} must be a question mapping."
+            )
+        normalized_students[student_id] = raw_answers
+
+    ordered_students = sorted(normalized_students)
+    ordered_questions = _clean_question_ids(question_ids)
+
+    texts: list[str] = []
+    keys: list[tuple[str, str]] = []
+    for student_id in ordered_students:
+        raw_answers = normalized_students[student_id]
+        for question_id in ordered_questions:
+            if question_id not in raw_answers:
+                continue
+            text = str(raw_answers.get(question_id, "") or "")
+            if not text.strip():
+                continue
+            keys.append((student_id, question_id))
+            texts.append(text)
+
+    vectors = get_embeddings(
+        texts,
+        provider,
+        cache_enabled=cache_enabled,
+        cache_dir=cache_dir,
+    )
+    vectors_by_key = {key: vector for key, vector in zip(keys, vectors)}
+
+    result: dict[tuple[str, str], dict[str, float]] = {}
+    for student_a, student_b in combinations(ordered_students, 2):
+        per_question: dict[str, float] = {}
+        for question_id in ordered_questions:
+            vector_a = vectors_by_key.get((student_a, question_id))
+            vector_b = vectors_by_key.get((student_b, question_id))
+            if vector_a is None or vector_b is None:
+                continue
+            per_question[question_id] = cosine_similarity(vector_a, vector_b)
+        if per_question:
+            result[(student_a, student_b)] = per_question
+
+    return result
+
+
+__all__ = [
+    "DEFAULT_EMBEDDING_THRESHOLDS",
+    "DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD",
+    "DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD",
+    "cosine_similarity",
+    "default_embedding_cache_dir",
+    "embedding_cache_key",
+    "load_cached_embedding",
+    "save_cached_embedding",
+    "get_embeddings",
+    "resolve_embedding_thresholds",
+    "embedding_flag_for_score",
+    "embedding_review_warnings",
+    "compute_question_embedding_similarity",
+]

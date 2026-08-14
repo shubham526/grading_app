@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from typing import Any
 
 
@@ -48,6 +49,8 @@ class QuestionSimilarity:
     shared_spans: list[dict[str, Any]] = field(default_factory=list)
     flag_level: str = "none"
     warnings: list[str] = field(default_factory=list)
+    embedding_cosine: float | None = None
+    advanced_flags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.question_id = str(self.question_id or "").strip()
@@ -55,6 +58,10 @@ class QuestionSimilarity:
         self.shared_shingle_count = int(self.shared_shingle_count)
         self.total_shingle_count = int(self.total_shingle_count)
         self.flag_level = _validate_flag_level(self.flag_level)
+        if self.embedding_cosine is not None:
+            self.embedding_cosine = float(self.embedding_cosine)
+            if not math.isfinite(self.embedding_cosine) or not 0.0 <= self.embedding_cosine <= 1.0:
+                raise ValueError("QuestionSimilarity.embedding_cosine must be between 0 and 1.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,6 +81,7 @@ class PairSimilarity:
     question_similarities: dict[str, QuestionSimilarity] = field(default_factory=dict)
     signals: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    embedding_max_similarity: float | None = None
 
     def __post_init__(self) -> None:
         self.student_a = str(self.student_a or "").strip()
@@ -86,6 +94,15 @@ class PairSimilarity:
         self.flag_level = _validate_flag_level(self.flag_level)
         if self.most_similar_question is not None:
             self.most_similar_question = str(self.most_similar_question)
+        if self.embedding_max_similarity is not None:
+            self.embedding_max_similarity = float(self.embedding_max_similarity)
+            if (
+                not math.isfinite(self.embedding_max_similarity)
+                or not 0.0 <= self.embedding_max_similarity <= 1.0
+            ):
+                raise ValueError(
+                    "PairSimilarity.embedding_max_similarity must be between 0 and 1."
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
