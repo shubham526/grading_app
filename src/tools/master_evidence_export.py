@@ -779,6 +779,317 @@ def build_master_evidence_rows_for_assignment(
     ).rows
 
 
+# ---------------------------------------------------------------------------
+# Semester-level composition (v2.2.1 Commit 2)
+# ---------------------------------------------------------------------------
+
+
+def _semester_entries(semester_config: Mapping[str, Any]) -> List[dict]:
+    """Return assignment config entries using the app's current schema first.
+
+    Existing semester configs created by ``tools/create_semester_config.py`` use
+    ``assessments``. The v2.2.1 design document uses ``assignments`` in its
+    example. Supporting both keeps current configs working without migration.
+    """
+    raw = semester_config.get("assessments")
+    if raw is None:
+        raw = semester_config.get("assignments", [])
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("semester config assessments/assignments must be a list")
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
+def _resolve_semester_path(value: Any, base_dir: Optional[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        root = Path(base_dir).expanduser() if base_dir else Path.cwd()
+        path = root / path
+    return str(path.resolve())
+
+
+def _load_json_object(path: str, *, label: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        raise
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read {label}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return data
+
+
+def _semester_course_meta(semester_config: Mapping[str, Any]) -> dict:
+    return {
+        "semester": str(semester_config.get("semester") or ""),
+        "course_code": str(semester_config.get("course_code") or ""),
+        "course_name": str(semester_config.get("course_name") or ""),
+        "section": str(semester_config.get("section") or ""),
+    }
+
+
+def _assignment_meta_from_entry(
+    entry: Mapping[str, Any], rubric_data: Mapping[str, Any]
+) -> dict:
+    """Normalize current and design-doc assignment metadata names."""
+    return {
+        "assignment_id": str(_nonblank(
+            entry.get("assignment_id"),
+            entry.get("assessment_id"),
+            rubric_data.get("assessment_id"),
+            default="",
+        )),
+        "assignment_title": str(_nonblank(
+            entry.get("assignment_title"),
+            entry.get("assessment_title"),
+            entry.get("assessment_name"),
+            rubric_data.get("title"),
+            default="",
+        )),
+        "assignment_type": str(_nonblank(
+            entry.get("assignment_type"),
+            entry.get("assessment_type"),
+            default="",
+        )),
+        "assignment_date": str(_nonblank(
+            entry.get("assignment_date"),
+            entry.get("assessment_date"),
+            default="",
+        )),
+        "weight": entry.get("weight", 1.0),
+    }
+
+
+def _semester_warning(code: str, message: str, assignment_id: str = "") -> dict:
+    warning = _warning(code, message)
+    warning["assignment_id"] = str(assignment_id or "")
+    return warning
+
+
+def _tag_semester_warning(warning: Mapping[str, Any], assignment_id: str) -> dict:
+    tagged = dict(warning)
+    if not tagged.get("assignment_id"):
+        tagged["assignment_id"] = str(assignment_id or "")
+    return tagged
+
+
+def _load_semester_outcome_profile(
+    semester_config: Mapping[str, Any],
+    *,
+    base_dir: Optional[str],
+    warnings: List[dict],
+) -> Any:
+    profile_id = str(semester_config.get("profile_id") or "").strip()
+    if not profile_id:
+        return None
+
+    candidate = profile_id
+    if profile_id.endswith(".json") or "/" in profile_id or "\\" in profile_id:
+        candidate = _resolve_semester_path(profile_id, base_dir)
+
+    try:
+        from src.core.outcome_profile import load_profile
+        return load_profile(candidate)
+    except Exception as exc:
+        warnings.append(_warning(
+            "outcome_profile_unavailable",
+            f"Could not load outcome profile {profile_id!r}: {exc}",
+        ))
+        return None
+
+
+def collect_master_evidence_for_semester(
+    semester_config: dict,
+    evidence_policy: str = DEFAULT_POLICY,
+    include_excluded: bool = False,
+    *,
+    base_dir: Optional[str] = None,
+    outcome_profile: Any = None,
+) -> MasterEvidenceBuildResult:
+    """Compose master evidence rows across configured ABET assignments.
+
+    This reuses Commit 1's assignment-level builder so semester composition does
+    not introduce a second interpretation of scoring or selected/counted state.
+    Relative paths resolve against ``base_dir``; the config-file helper below
+    supplies the config file's parent directory automatically.
+    """
+    if evidence_policy not in VALID_EVIDENCE_POLICIES:
+        raise ValueError(
+            f"Unsupported evidence policy {evidence_policy!r}; expected one of "
+            f"{sorted(VALID_EVIDENCE_POLICIES)}"
+        )
+    if not isinstance(semester_config, dict):
+        raise ValueError("semester_config must be a dictionary")
+
+    entries = _semester_entries(semester_config)
+    result = MasterEvidenceBuildResult()
+    if not entries:
+        result.warnings.append(_warning(
+            "no_assignments_configured",
+            "Semester config contains no assessments/assignments.",
+        ))
+        return result
+
+    if outcome_profile is None:
+        outcome_profile = _load_semester_outcome_profile(
+            semester_config, base_dir=base_dir, warnings=result.warnings
+        )
+
+    semester_course_meta = _semester_course_meta(semester_config)
+
+    for index, entry in enumerate(entries):
+        # Match the existing SemesterABETReport boundary.
+        if not bool(entry.get("include_in_abet", True)):
+            continue
+
+        provisional_id = str(_nonblank(
+            entry.get("assignment_id"),
+            entry.get("assessment_id"),
+            default=f"assignment_{index + 1}",
+        ))
+
+        rubric_path = _resolve_semester_path(entry.get("rubric_path"), base_dir)
+        if not rubric_path:
+            result.warnings.append(_semester_warning(
+                "missing_rubric_path",
+                "Semester assignment has no rubric_path; assignment was skipped.",
+                provisional_id,
+            ))
+            continue
+        if not Path(rubric_path).is_file():
+            result.warnings.append(_semester_warning(
+                "rubric_file_missing",
+                f"Rubric file not found: {rubric_path}",
+                provisional_id,
+            ))
+            continue
+
+        try:
+            rubric_data = _load_json_object(rubric_path, label="rubric")
+        except ValueError as exc:
+            result.warnings.append(_semester_warning(
+                "rubric_file_unreadable",
+                str(exc),
+                provisional_id,
+            ))
+            continue
+        if not isinstance(rubric_data.get("criteria"), list):
+            result.warnings.append(_semester_warning(
+                "rubric_file_unreadable",
+                "Rubric must contain a criteria list.",
+                provisional_id,
+            ))
+            continue
+
+        assignment_meta = _assignment_meta_from_entry(entry, rubric_data)
+        assignment_id = assignment_meta.get("assignment_id") or provisional_id
+
+        assessments_value = _nonblank(
+            entry.get("assessments_dir"),
+            entry.get("assessment_dir"),
+            default="",
+        )
+        assessments_dir = _resolve_semester_path(assessments_value, base_dir)
+        if not assessments_dir:
+            result.warnings.append(_semester_warning(
+                "missing_assessments_dir",
+                "Semester assignment has no assessment_dir/assessments_dir; assignment was skipped.",
+                assignment_id,
+            ))
+            continue
+        if not Path(assessments_dir).is_dir():
+            result.warnings.append(_semester_warning(
+                "assessments_dir_missing",
+                f"Assessments directory not found: {assessments_dir}",
+                assignment_id,
+            ))
+            continue
+
+        course_meta = dict(semester_course_meta)
+        if not course_meta["semester"]:
+            course_meta["semester"] = str(rubric_data.get("semester") or "")
+        if not course_meta["course_code"]:
+            course_meta["course_code"] = str(rubric_data.get("course_code") or "")
+        if not course_meta["course_name"]:
+            course_meta["course_name"] = str(rubric_data.get("course_name") or "")
+
+        built = collect_master_evidence_for_assignment(
+            rubric_data,
+            assessments_dir,
+            assignment_meta,
+            course_meta,
+            evidence_policy=evidence_policy,
+            include_excluded=include_excluded,
+            outcome_profile=outcome_profile,
+        )
+        result.rows.extend(built.rows)
+        result.warnings.extend(
+            _tag_semester_warning(warning, assignment_id)
+            for warning in built.warnings
+        )
+
+    return result
+
+
+def build_master_evidence_rows_for_semester(
+    semester_config: dict,
+    evidence_policy: str = DEFAULT_POLICY,
+    include_excluded: bool = False,
+    *,
+    base_dir: Optional[str] = None,
+    outcome_profile: Any = None,
+) -> List[dict]:
+    """Design-doc public API: return normalized rows across a semester config."""
+    return collect_master_evidence_for_semester(
+        semester_config,
+        evidence_policy=evidence_policy,
+        include_excluded=include_excluded,
+        base_dir=base_dir,
+        outcome_profile=outcome_profile,
+    ).rows
+
+
+def collect_master_evidence_for_semester_config(
+    config_path: str,
+    evidence_policy: str = DEFAULT_POLICY,
+    include_excluded: bool = False,
+    *,
+    outcome_profile: Any = None,
+) -> MasterEvidenceBuildResult:
+    """Load a semester config JSON and resolve portable relative paths."""
+    path = Path(config_path).expanduser().resolve()
+    config = _load_json_object(str(path), label="semester config")
+    return collect_master_evidence_for_semester(
+        config,
+        evidence_policy=evidence_policy,
+        include_excluded=include_excluded,
+        base_dir=str(path.parent),
+        outcome_profile=outcome_profile,
+    )
+
+
+def build_master_evidence_rows_for_semester_config(
+    config_path: str,
+    evidence_policy: str = DEFAULT_POLICY,
+    include_excluded: bool = False,
+    *,
+    outcome_profile: Any = None,
+) -> List[dict]:
+    """Convenience row-only API for a semester config JSON file."""
+    return collect_master_evidence_for_semester_config(
+        config_path,
+        evidence_policy=evidence_policy,
+        include_excluded=include_excluded,
+        outcome_profile=outcome_profile,
+    ).rows
+
+
 __all__ = [
     "MASTER_EVIDENCE_FIELDS",
     "MasterEvidenceBuildResult",
@@ -786,4 +1097,8 @@ __all__ = [
     "build_master_evidence_rows_for_assessment",
     "build_master_evidence_rows_for_assignment",
     "collect_master_evidence_for_assignment",
+    "build_master_evidence_rows_for_semester",
+    "collect_master_evidence_for_semester",
+    "build_master_evidence_rows_for_semester_config",
+    "collect_master_evidence_for_semester_config",
 ]
