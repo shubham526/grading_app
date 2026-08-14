@@ -94,6 +94,7 @@ class PairSimilarity:
     embedding_max_similarity: float | None = None
     pseudocode_max_similarity: float | None = None
     cluster_ids: list[str] = field(default_factory=list)
+    trend_flags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.student_a = str(self.student_a or "").strip()
@@ -134,6 +135,16 @@ class PairSimilarity:
             seen_cluster_ids.add(cluster_id)
             cleaned_cluster_ids.append(cluster_id)
         self.cluster_ids = cleaned_cluster_ids
+
+        cleaned_trend_flags: list[str] = []
+        seen_trend_flags: set[str] = set()
+        for raw_flag in self.trend_flags:
+            flag = str(raw_flag or "").strip()
+            if not flag or flag in seen_trend_flags:
+                continue
+            seen_trend_flags.add(flag)
+            cleaned_trend_flags.append(flag)
+        self.trend_flags = cleaned_trend_flags
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

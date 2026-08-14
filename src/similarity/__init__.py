@@ -95,6 +95,12 @@ __all__ = [
     "DEFAULT_CLUSTER_MIN_FLAG_LEVEL",
     "build_similarity_graph",
     "find_similarity_clusters",
+    "DEFAULT_TREND_MIN_FLAG_LEVEL",
+    "DEFAULT_TREND_MIN_ASSIGNMENT_COUNT",
+    "TRENDS_REVIEW_WARNING",
+    "similarity_report_from_dict",
+    "load_similarity_reports",
+    "analyze_similarity_trends",
     "EmbeddingProvider",
     "MockEmbeddingProvider",
     "DEFAULT_SENTENCE_TRANSFORMER_MODEL",
@@ -165,6 +171,14 @@ __all__ = [
 
 ]
 
+from .trends import (
+    DEFAULT_TREND_MIN_ASSIGNMENT_COUNT,
+    DEFAULT_TREND_MIN_FLAG_LEVEL,
+    TRENDS_REVIEW_WARNING,
+    analyze_similarity_trends,
+    load_similarity_reports,
+    similarity_report_from_dict,
+)
 from .sources import (
     SOURCE_ASSESSMENT_FOLDER,
     SOURCE_LOADED,
