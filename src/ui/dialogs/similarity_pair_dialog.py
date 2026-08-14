@@ -1,4 +1,4 @@
-"""Pair-detail review dialog for deterministic submission similarity."""
+"""Pair-detail review dialog for deterministic and advanced similarity."""
 
 from __future__ import annotations
 
@@ -87,6 +87,41 @@ class PairSimilarityDetailDialog(QDialog):
             ordered.append(self.pair.most_similar_question)
         return ordered
 
+    @staticmethod
+    def _optional_score(value: float | None) -> str:
+        return "—" if value is None else f"{float(value):.4f}"
+
+    def _trend_count(self) -> int:
+        signal = self.pair.signals.get("cross_assignment_trend")
+        if not isinstance(signal, Mapping):
+            return 0
+        details = signal.get("details")
+        if not isinstance(details, Mapping):
+            return 0
+        try:
+            return int(details.get("count", len(details.get("assignments", []) or [])) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _provenance_lines(student_id: str, provenance: Mapping[str, Any]) -> list[str]:
+        if not provenance:
+            return [student_id, "  No submission provenance available."]
+        lines = [
+            student_id,
+            f"  Source used: {provenance.get('source_used') or '—'}",
+            f"  Authoritative source: {provenance.get('authoritative_source') or '—'}",
+            f"  Text used for analysis: "
+            f"{provenance.get('analysis_text_source') or provenance.get('assistive_text_source') or '—'}",
+            f"  Assistive transcription: "
+            f"{'Yes' if provenance.get('uses_assistive_transcription') else 'No'}",
+        ]
+        if provenance.get("uses_assistive_transcription"):
+            lines.append(
+                "  Note: advanced similarity used assistive machine transcription."
+            )
+        return lines
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -103,9 +138,13 @@ class PairSimilarityDetailDialog(QDialog):
         summary = QLabel(
             f"Flag: <b>{self.pair.flag_level}</b> &nbsp;&nbsp; "
             f"Overall: <b>{self.pair.overall_score:.4f}</b> &nbsp;&nbsp; "
-            f"Most similar question: <b>{self.pair.most_similar_question or '—'}</b> &nbsp;&nbsp; "
+            f"Most similar question: <b>{self.pair.most_similar_question or '—'}</b><br>"
             f"Exact file: <b>{'yes' if self.pair.exact_file_match else 'no'}</b> &nbsp;&nbsp; "
-            f"Normalized match: <b>{'yes' if self.pair.normalized_text_match else 'no'}</b>"
+            f"Normalized match: <b>{'yes' if self.pair.normalized_text_match else 'no'}</b> &nbsp;&nbsp; "
+            f"Embedding max: <b>{self._optional_score(self.pair.embedding_max_similarity)}</b> &nbsp;&nbsp; "
+            f"Pseudocode max: <b>{self._optional_score(self.pair.pseudocode_max_similarity)}</b> &nbsp;&nbsp; "
+            f"Cluster: <b>{', '.join(self.pair.cluster_ids) or '—'}</b> &nbsp;&nbsp; "
+            f"Trend count: <b>{self._trend_count()}</b>"
         )
         summary.setTextFormat(Qt.RichText)
         summary.setWordWrap(True)
@@ -220,8 +259,13 @@ class PairSimilarityDetailDialog(QDialog):
         if question_result is not None:
             score_text = (
                 f"N-gram Jaccard: <b>{question_result.ngram_jaccard:.4f}</b> &nbsp;&nbsp; "
-                f"Question flag: <b>{question_result.flag_level}</b> &nbsp;&nbsp; "
-                f"Shared shingles: <b>{question_result.shared_shingle_count}</b>"
+                f"Deterministic question flag: <b>{question_result.flag_level}</b> &nbsp;&nbsp; "
+                f"Shared shingles: <b>{question_result.shared_shingle_count}</b><br>"
+                f"Embedding similarity: <b>{self._optional_score(question_result.embedding_cosine)}</b> "
+                f"&nbsp;&nbsp; Pseudocode similarity: "
+                f"<b>{self._optional_score(question_result.pseudocode_similarity)}</b> "
+                f"&nbsp;&nbsp; Advanced flags: "
+                f"<b>{', '.join(question_result.advanced_flags) or '—'}</b>"
             )
         else:
             score_text = (
@@ -347,6 +391,59 @@ class PairSimilarityDetailDialog(QDialog):
                 lines.append(f"  {question_id}: {float(value):.4f}")
         else:
             lines.append("  Not computed under the selected methods.")
+
+        lines.append("")
+        lines.append("Embedding similarity")
+        embedding = signals.get("embedding_cosine")
+        if isinstance(embedding, dict):
+            lines.append(
+                f"  Max: {self._optional_score(self.pair.embedding_max_similarity)}"
+            )
+            details = embedding.get("details")
+            if isinstance(details, Mapping):
+                if details.get("provider"):
+                    lines.append(f"  Provider: {details.get('provider')}")
+                if details.get("model"):
+                    lines.append(f"  Model: {details.get('model')}")
+        else:
+            lines.append("  Not computed.")
+
+        lines.append("")
+        lines.append("Pseudocode structure similarity")
+        pseudocode = signals.get("pseudocode_structure")
+        if isinstance(pseudocode, dict):
+            lines.append(
+                f"  Max: {self._optional_score(self.pair.pseudocode_max_similarity)}"
+            )
+            details = pseudocode.get("details")
+            if isinstance(details, Mapping) and details.get("method"):
+                lines.append(f"  Method: {details.get('method')}")
+        else:
+            lines.append("  Not computed.")
+
+        lines.append("")
+        lines.append("Cluster / trend context")
+        lines.append(f"  Clusters: {', '.join(self.pair.cluster_ids) or '—'}")
+        lines.append(f"  Trend count: {self._trend_count()}")
+        if self.pair.trend_flags:
+            lines.append(f"  Trend flags: {', '.join(self.pair.trend_flags)}")
+
+        lines.append("")
+        lines.append("Submission provenance")
+        provenance = (
+            self.pair.submission_provenance
+            if isinstance(self.pair.submission_provenance, dict)
+            else {}
+        )
+        for index, student_id in enumerate((self.pair.student_a, self.pair.student_b)):
+            if index:
+                lines.append("")
+            lines.extend(
+                self._provenance_lines(
+                    student_id,
+                    provenance.get(student_id, {}),
+                )
+            )
 
         return "\n".join(lines)
 

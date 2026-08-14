@@ -55,6 +55,31 @@ class TestSimilarityUiWiringWithoutQt(unittest.TestCase):
         self.assertNotIn("self.warning_list.setMaximumHeight", source)
         self.assertNotIn("shared_list.setMaximumHeight", source)
 
+    def test_dialog_wires_advanced_similarity_backend(self):
+        source = DIALOG.read_text(encoding="utf-8")
+        self.assertIn("generate_advanced_similarity_report", source)
+        self.assertIn("analyze_similarity_trends", source)
+        self.assertIn("load_similarity_reports", source)
+        self.assertIn("SentenceTransformerEmbeddingProvider", source)
+        self.assertIn('"Embedding similarity"', source)
+        self.assertIn('"Pseudocode structure similarity"', source)
+        self.assertIn('"Clustering"', source)
+        self.assertIn('"Trends across assignments"', source)
+
+    def test_dialog_has_pairs_clusters_and_trends_tabs(self):
+        source = DIALOG.read_text(encoding="utf-8")
+        self.assertIn('self.result_tabs.addTab(pairs_tab, "Pairs")', source)
+        self.assertIn('self.result_tabs.addTab(clusters_tab, "Clusters")', source)
+        self.assertIn('self.result_tabs.addTab(trends_tab, "Trends")', source)
+        self.assertIn("SimilarityClusterDetailDialog", source)
+
+    def test_pair_detail_displays_advanced_signals_and_provenance(self):
+        source = PAIR_DIALOG.read_text(encoding="utf-8")
+        self.assertIn("Embedding similarity", source)
+        self.assertIn("Pseudocode structure similarity", source)
+        self.assertIn("Submission provenance", source)
+        self.assertIn("Assistive transcription", source)
+
     def test_pair_signal_summary_is_instructor_readable(self):
         source = PAIR_DIALOG.read_text(encoding="utf-8")
         self.assertIn('"Exact file hash"', source)
@@ -68,6 +93,7 @@ try:
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication, QSplitter
 
+    from src.similarity.mock_embedding_provider import MockEmbeddingProvider
     from src.similarity.models import PairSimilarity, QuestionSimilarity
     from src.ui.dialogs.similarity_dialog import SimilarityReviewDialog
     from src.ui.dialogs.similarity_pair_dialog import PairSimilarityDetailDialog
@@ -108,6 +134,18 @@ class TestSimilarityReviewDialog(unittest.TestCase):
                 "bob": self._submission("bob", text_b),
             },
         )
+
+    def _advanced_dialog(self):
+        dialog = self._dialog()
+        vectors = {
+            dialog.loaded_submissions["alice"]["extracted_answers"]["Q1"]: [1.0, 0.0],
+            dialog.loaded_submissions["bob"]["extracted_answers"]["Q1"]: [1.0, 0.0],
+        }
+        dialog.embedding_provider_factory = lambda: MockEmbeddingProvider(vectors=vectors)
+        dialog.embedding_available = True
+        dialog.embedding_check.setEnabled(True)
+        dialog.embedding_status_label.setText("Test embedding provider available.")
+        return dialog
 
     @staticmethod
     def _write_assessment(path, student_id, q1, q2):
@@ -245,6 +283,52 @@ class TestSimilarityReviewDialog(unittest.TestCase):
             self.assertTrue(dialog.last_html_path.is_file())
         dialog.close()
 
+    def test_advanced_method_controls_exist_and_default_off(self):
+        dialog = self._advanced_dialog()
+        self.assertFalse(dialog.embedding_check.isChecked())
+        self.assertFalse(dialog.pseudocode_check.isChecked())
+        self.assertFalse(dialog.clustering_check.isChecked())
+        self.assertFalse(dialog.trends_check.isChecked())
+        self.assertEqual(dialog.result_tabs.count(), 3)
+        self.assertEqual(
+            [dialog.result_tabs.tabText(i) for i in range(dialog.result_tabs.count())],
+            ["Pairs", "Clusters", "Trends"],
+        )
+        dialog.close()
+
+    def test_embedding_review_populates_advanced_pair_column(self):
+        dialog = self._advanced_dialog()
+        dialog.embedding_check.setChecked(True)
+        dialog.run_review()
+
+        self.assertIn("embedding_cosine", dialog.report.advanced_methods)
+        self.assertEqual(dialog.report.pairs[0].embedding_max_similarity, 1.0)
+        self.assertEqual(dialog.results_table.item(0, 7).text(), "1.0000")
+        dialog.close()
+
+    def test_clustering_populates_cluster_tab(self):
+        dialog = self._advanced_dialog()
+        dialog.embedding_check.setChecked(True)
+        dialog.clustering_check.setChecked(True)
+        dialog.run_review()
+
+        self.assertEqual(len(dialog.report.clusters), 1)
+        self.assertEqual(dialog.clusters_table.rowCount(), 1)
+        self.assertEqual(dialog.clusters_table.item(0, 0).text(), "C1")
+        self.assertIsNotNone(dialog.selected_cluster())
+        dialog.close()
+
+    def test_export_helper_writes_cluster_and_trend_csv(self):
+        dialog = self._advanced_dialog()
+        dialog.embedding_check.setChecked(True)
+        dialog.clustering_check.setChecked(True)
+        dialog.run_review()
+        with tempfile.TemporaryDirectory() as tmp:
+            results = dialog._export_to_directory(tmp)
+            self.assertTrue(results["clusters_csv"].is_file())
+            self.assertTrue(results["trends_csv"].is_file())
+        dialog.close()
+
     def test_pair_detail_shows_question_tabs(self):
         pair = PairSimilarity(
             student_a="alice",
@@ -349,6 +433,86 @@ class TestSimilarityReviewDialog(unittest.TestCase):
         self.assertIn("Matching questions: Q1", summary)
         self.assertIn("N-gram overlap", summary)
         self.assertIn("Q1: 1.0000", summary)
+        detail.close()
+
+    def test_pair_detail_formats_advanced_signals_and_provenance(self):
+        pair = PairSimilarity(
+            student_a="alice",
+            student_b="bob",
+            overall_score=0.95,
+            flag_level="high",
+            most_similar_question="Q1",
+            question_similarities={
+                "Q1": QuestionSimilarity(
+                    question_id="Q1",
+                    ngram_jaccard=0.20,
+                    flag_level="none",
+                    embedding_cosine=0.95,
+                    pseudocode_similarity=0.84,
+                    advanced_flags=["embedding_high", "pseudocode_high"],
+                )
+            },
+            embedding_max_similarity=0.95,
+            pseudocode_max_similarity=0.84,
+            cluster_ids=["C1"],
+            trend_flags=["cross_assignment_trend"],
+            signals={
+                "embedding_cosine": {
+                    "method": "embedding_cosine",
+                    "score": 0.95,
+                    "details": {
+                        "provider": "mock",
+                        "model": "mock-embedding",
+                        "count": 2,
+                    },
+                },
+                "pseudocode_structure": {
+                    "method": "pseudocode_structure",
+                    "score": 0.84,
+                    "details": {"method": "normalized_token_3gram_jaccard"},
+                },
+                "cross_assignment_trend": {
+                    "method": "cross_assignment_trend",
+                    "score": 0.97,
+                    "details": {
+                        "count": 2,
+                        "assignments": ["PS2", "PS3"],
+                    },
+                },
+            },
+            submission_provenance={
+                "alice": {
+                    "source_used": "latex",
+                    "authoritative_source": "latex",
+                    "analysis_text_source": "latex",
+                    "uses_assistive_transcription": False,
+                },
+                "bob": {
+                    "source_used": "pdf",
+                    "authoritative_source": "original_pdf",
+                    "analysis_text_source": "machine_transcription",
+                    "uses_assistive_transcription": True,
+                },
+            },
+        )
+        detail = PairSimilarityDetailDialog(
+            pair=pair,
+            submissions={
+                "alice": self._submission("alice", "answer a"),
+                "bob": self._submission("bob", "answer b"),
+            },
+            question_ids=["Q1"],
+        )
+        summary = detail.signal_text.toPlainText()
+        self.assertIn("Embedding similarity", summary)
+        self.assertIn("Max: 0.9500", summary)
+        self.assertIn("Pseudocode structure similarity", summary)
+        self.assertIn("Max: 0.8400", summary)
+        self.assertIn("Clusters: C1", summary)
+        self.assertIn("Trend count: 2", summary)
+        self.assertIn("Submission provenance", summary)
+        self.assertIn("machine_transcription", summary)
+        self.assertIn("Assistive transcription: Yes", summary)
         detail.close()
 
 
