@@ -5,6 +5,13 @@ package with optional semantic-embedding and pseudocode-structure signals
 while keeping automated tests fully offline.
 """
 
+from .advanced_report import (
+    ASSISTIVE_TRANSCRIPTION_REVIEW_WARNING,
+    CROSS_ASSIGNMENT_TREND_FLAG,
+    EMBEDDING_REVIEW_WARNING,
+    generate_advanced_similarity_report,
+    submission_similarity_provenance,
+)
 from .clustering import (
     DEFAULT_CLUSTER_MIN_FLAG_LEVEL,
     build_similarity_graph,
@@ -92,6 +99,11 @@ __all__ = [
     "QuestionSimilarity",
     "PairSimilarity",
     "SimilarityReport",
+    "EMBEDDING_REVIEW_WARNING",
+    "ASSISTIVE_TRANSCRIPTION_REVIEW_WARNING",
+    "CROSS_ASSIGNMENT_TREND_FLAG",
+    "submission_similarity_provenance",
+    "generate_advanced_similarity_report",
     "DEFAULT_CLUSTER_MIN_FLAG_LEVEL",
     "build_similarity_graph",
     "find_similarity_clusters",

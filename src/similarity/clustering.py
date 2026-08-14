@@ -117,6 +117,16 @@ def _questions_for_pair(
         if FLAG_RANK[question.flag_level] >= threshold_rank:
             questions.add(str(qid))
 
+        for raw_flag in question.advanced_flags:
+            flag = str(raw_flag or "").strip()
+            if "_" not in flag:
+                continue
+            method, level = flag.rsplit("_", 1)
+            if method not in {"embedding", "pseudocode"} or level not in FLAG_RANK:
+                continue
+            if FLAG_RANK[level] >= threshold_rank:
+                questions.add(str(qid))
+
     normalized = pair.signals.get("normalized_text_hash")
     if isinstance(normalized, dict):
         details = normalized.get("details")
@@ -165,11 +175,37 @@ def _signals_for_pair(
     ):
         signals.add("ngram_jaccard")
 
-    # v2.3.1 advanced-report integration will add these keys only when the
-    # corresponding signal participates in the pair result.
-    for method in ("embedding_cosine", "pseudocode_structure"):
-        if method in pair.signals:
-            signals.add(method)
+    embedding_flags = [
+        str(raw_flag)
+        for question in pair.question_similarities.values()
+        for raw_flag in question.advanced_flags
+        if str(raw_flag).startswith("embedding_")
+    ]
+    if (
+        any(
+            flag.rsplit("_", 1)[-1] in FLAG_RANK
+            and FLAG_RANK[flag.rsplit("_", 1)[-1]] >= threshold_rank
+            for flag in embedding_flags
+        )
+        or ("embedding_cosine" in pair.signals and not embedding_flags)
+    ):
+        signals.add("embedding_cosine")
+
+    pseudocode_flags = [
+        str(raw_flag)
+        for question in pair.question_similarities.values()
+        for raw_flag in question.advanced_flags
+        if str(raw_flag).startswith("pseudocode_")
+    ]
+    if (
+        any(
+            flag.rsplit("_", 1)[-1] in FLAG_RANK
+            and FLAG_RANK[flag.rsplit("_", 1)[-1]] >= threshold_rank
+            for flag in pseudocode_flags
+        )
+        or ("pseudocode_structure" in pair.signals and not pseudocode_flags)
+    ):
+        signals.add("pseudocode_structure")
 
     return signals
 

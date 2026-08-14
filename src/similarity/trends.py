@@ -98,6 +98,7 @@ def _pair_from_mapping(payload: Mapping[str, Any]) -> PairSimilarity:
         pseudocode_max_similarity=payload.get("pseudocode_max_similarity"),
         cluster_ids=list(payload.get("cluster_ids", []) or []),
         trend_flags=list(payload.get("trend_flags", []) or []),
+        submission_provenance=dict(payload.get("submission_provenance", {}) or {}),
     )
 
 
@@ -133,6 +134,12 @@ def similarity_report_from_dict(payload: Mapping[str, Any]) -> SimilarityReport:
         thresholds=dict(payload.get("thresholds", {}) or {}),
         warnings=list(payload.get("warnings", []) or []),
         report_type=str(payload.get("report_type") or "submission_similarity"),
+        advanced_methods=list(payload.get("advanced_methods", []) or []),
+        clusters=list(payload.get("clusters", []) or []),
+        trends=list(payload.get("trends", []) or []),
+        embedding_config=dict(payload.get("embedding_config", {}) or {}),
+        pseudocode_config=dict(payload.get("pseudocode_config", {}) or {}),
+        submission_provenance=dict(payload.get("submission_provenance", {}) or {}),
     )
 
 
@@ -211,16 +218,15 @@ def _pair_questions(
         if FLAG_RANK[question.flag_level] >= threshold_rank:
             questions.add(str(qid))
 
-        # Advanced semantic/structural scores may be present before advanced
-        # report integration updates the question flag. Keep their question ID
-        # when the pair's advanced signal is registered.
-        if question.embedding_cosine is not None and "embedding_cosine" in pair.signals:
-            questions.add(str(qid))
-        if (
-            question.pseudocode_similarity is not None
-            and "pseudocode_structure" in pair.signals
-        ):
-            questions.add(str(qid))
+        for raw_flag in question.advanced_flags:
+            flag = str(raw_flag or "").strip()
+            if "_" not in flag:
+                continue
+            method, level = flag.rsplit("_", 1)
+            if method not in {"embedding", "pseudocode"} or level not in FLAG_RANK:
+                continue
+            if FLAG_RANK[level] >= threshold_rank:
+                questions.add(str(qid))
 
     normalized = pair.signals.get("normalized_text_hash")
     if isinstance(normalized, Mapping):
@@ -240,34 +246,53 @@ def _pair_questions(
     return sorted(questions)
 
 
-def _pair_signals(pair: PairSimilarity) -> list[str]:
-    """Return stable signal names represented in a qualifying pair."""
+def _pair_signals(pair: PairSimilarity, min_flag_level: str) -> list[str]:
+    """Return pairwise signal names that meet the trend threshold."""
 
     signals: set[str] = set()
+    threshold_rank = FLAG_RANK[min_flag_level]
 
     if pair.exact_file_match:
         signals.add("exact_file_hash")
-    if pair.normalized_text_match:
+    if pair.normalized_text_match and threshold_rank <= FLAG_RANK["high"]:
         signals.add("normalized_text_hash")
-    if pair.question_similarities:
-        # Only call n-gram a contributor when at least one stored question
-        # actually has non-zero n-gram evidence or the method exists in signals.
-        if (
-            "ngram_jaccard" in pair.signals
-            or any(q.ngram_jaccard > 0.0 for q in pair.question_similarities.values())
-        ):
-            signals.add("ngram_jaccard")
+    if any(
+        FLAG_RANK[question.flag_level] >= threshold_rank
+        for question in pair.question_similarities.values()
+    ):
+        signals.add("ngram_jaccard")
 
-    for method in ("embedding_cosine", "pseudocode_structure"):
-        if method in pair.signals:
-            signals.add(method)
+    embedding_flags = [
+        str(raw_flag)
+        for question in pair.question_similarities.values()
+        for raw_flag in question.advanced_flags
+        if str(raw_flag).startswith("embedding_")
+    ]
+    if (
+        any(
+            flag.rsplit("_", 1)[-1] in FLAG_RANK
+            and FLAG_RANK[flag.rsplit("_", 1)[-1]] >= threshold_rank
+            for flag in embedding_flags
+        )
+        or ("embedding_cosine" in pair.signals and not embedding_flags)
+    ):
+        signals.add("embedding_cosine")
 
-    # Preserve any future explicitly registered advanced signal method without
-    # guessing from numeric fields.
-    for raw_method in pair.signals:
-        method = str(raw_method or "").strip()
-        if method:
-            signals.add(method)
+    pseudocode_flags = [
+        str(raw_flag)
+        for question in pair.question_similarities.values()
+        for raw_flag in question.advanced_flags
+        if str(raw_flag).startswith("pseudocode_")
+    ]
+    if (
+        any(
+            flag.rsplit("_", 1)[-1] in FLAG_RANK
+            and FLAG_RANK[flag.rsplit("_", 1)[-1]] >= threshold_rank
+            for flag in pseudocode_flags
+        )
+        or ("pseudocode_structure" in pair.signals and not pseudocode_flags)
+    ):
+        signals.add("pseudocode_structure")
 
     return sorted(signals)
 
@@ -345,7 +370,7 @@ def analyze_similarity_trends(
 
         signals: set[str] = set()
         for assignment in assignments:
-            signals.update(_pair_signals(by_assignment[assignment]))
+            signals.update(_pair_signals(by_assignment[assignment], level))
 
         trends.append(
             {

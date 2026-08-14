@@ -95,6 +95,7 @@ class PairSimilarity:
     pseudocode_max_similarity: float | None = None
     cluster_ids: list[str] = field(default_factory=list)
     trend_flags: list[str] = field(default_factory=list)
+    submission_provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.student_a = str(self.student_a or "").strip()
@@ -146,6 +147,23 @@ class PairSimilarity:
             cleaned_trend_flags.append(flag)
         self.trend_flags = cleaned_trend_flags
 
+        if not isinstance(self.submission_provenance, dict):
+            raise TypeError("PairSimilarity.submission_provenance must be a dictionary.")
+        cleaned_provenance: dict[str, dict[str, Any]] = {}
+        for raw_student_id, raw_value in self.submission_provenance.items():
+            student_id = str(raw_student_id or "").strip()
+            if not student_id:
+                continue
+            if raw_value is None:
+                cleaned_provenance[student_id] = {}
+            elif isinstance(raw_value, dict):
+                cleaned_provenance[student_id] = dict(raw_value)
+            else:
+                raise TypeError(
+                    "PairSimilarity submission provenance values must be dictionaries."
+                )
+        self.submission_provenance = cleaned_provenance
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -162,6 +180,12 @@ class SimilarityReport:
     thresholds: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     report_type: str = "submission_similarity"
+    advanced_methods: list[str] = field(default_factory=list)
+    clusters: list[dict[str, Any]] = field(default_factory=list)
+    trends: list[dict[str, Any]] = field(default_factory=list)
+    embedding_config: dict[str, Any] = field(default_factory=dict)
+    pseudocode_config: dict[str, Any] = field(default_factory=dict)
+    submission_provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.assignment_id = str(self.assignment_id or "").strip()
@@ -170,6 +194,38 @@ class SimilarityReport:
         self.generated_at = str(self.generated_at or "").strip()
         if not self.generated_at:
             raise ValueError("SimilarityReport.generated_at must be non-empty.")
+
+        cleaned_advanced_methods: list[str] = []
+        seen_advanced_methods: set[str] = set()
+        for raw_method in self.advanced_methods:
+            method = str(raw_method or "").strip()
+            if not method or method in seen_advanced_methods:
+                continue
+            seen_advanced_methods.add(method)
+            cleaned_advanced_methods.append(method)
+        self.advanced_methods = cleaned_advanced_methods
+
+        if not isinstance(self.embedding_config, dict):
+            raise TypeError("SimilarityReport.embedding_config must be a dictionary.")
+        if not isinstance(self.pseudocode_config, dict):
+            raise TypeError("SimilarityReport.pseudocode_config must be a dictionary.")
+        if not isinstance(self.submission_provenance, dict):
+            raise TypeError("SimilarityReport.submission_provenance must be a dictionary.")
+
+        cleaned_report_provenance: dict[str, dict[str, Any]] = {}
+        for raw_student_id, raw_value in self.submission_provenance.items():
+            student_id = str(raw_student_id or "").strip()
+            if not student_id:
+                continue
+            if raw_value is None:
+                cleaned_report_provenance[student_id] = {}
+            elif isinstance(raw_value, dict):
+                cleaned_report_provenance[student_id] = dict(raw_value)
+            else:
+                raise TypeError(
+                    "SimilarityReport submission provenance values must be dictionaries."
+                )
+        self.submission_provenance = cleaned_report_provenance
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
