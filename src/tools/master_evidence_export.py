@@ -1,8 +1,8 @@
-"""Master ABET evidence row generation for v2.2.1.
+"""Master ABET evidence generation and export for v2.2.1.
 
-Commit 1 intentionally stops at the normalized in-memory evidence layer.  It
-produces one auditable row per student/assignment/rubric criterion and does not
-write CSV, JSON, XLSX, or alter any grading/ABET score calculation.
+The backend produces one auditable row per student/assignment/rubric criterion,
+composes those rows across semester configs, and exports the normalized evidence
+to CSV, JSON, and XLSX without altering any grading or ABET score calculation.
 
 The implementation follows the application's existing persistence semantics:
 
@@ -22,8 +22,10 @@ The implementation follows the application's existing persistence semantics:
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -1090,8 +1092,534 @@ def build_master_evidence_rows_for_semester_config(
     ).rows
 
 
+
+# ---------------------------------------------------------------------------
+# Export layer (v2.2.1 Commit 3)
+# ---------------------------------------------------------------------------
+
+# CSV/XLSX use stable human-facing labels while JSON intentionally preserves
+# the normalized snake_case row schema used by the backend APIs above.
+MASTER_EVIDENCE_COLUMN_LABELS: Tuple[Tuple[str, str], ...] = (
+    ("semester", "Semester"),
+    ("course_code", "Course Code"),
+    ("course_name", "Course Name"),
+    ("section", "Section"),
+    ("assignment_id", "Assignment ID"),
+    ("assignment_title", "Assignment Title"),
+    ("assignment_type", "Assignment Type"),
+    ("assignment_date", "Assignment Date"),
+    ("student_id", "Student ID"),
+    ("student_name", "Student Name"),
+    ("question_id", "Question ID"),
+    ("criterion_id", "Criterion ID"),
+    ("criterion_title", "Criterion Title"),
+    ("criterion_description", "Criterion Description"),
+    ("points_awarded", "Points Awarded"),
+    ("points_possible", "Points Possible"),
+    ("percentage", "Percentage"),
+    ("selected", "Selected"),
+    ("counted", "Counted"),
+    ("evidence_policy", "Evidence Policy"),
+    ("course_outcomes", "Course Outcomes"),
+    ("program_outcomes", "Program Outcomes"),
+    ("abet_outcomes", "ABET Outcomes"),
+    ("assessment_tags", "Assessment Tags"),
+    ("performance_band", "Performance Band"),
+    ("meets_target", "Meets Target"),
+    ("submission_source", "Submission Source"),
+    ("submission_file_latex", "Submission Latex File"),
+    ("submission_file_pdf", "Submission PDF File"),
+    ("submission_hash_latex", "Submission Latex SHA256"),
+    ("submission_hash_pdf", "Submission PDF SHA256"),
+    ("notes", "Notes"),
+)
+
+MASTER_EVIDENCE_EXPORT_COLUMNS: Tuple[str, ...] = tuple(
+    label for _, label in MASTER_EVIDENCE_COLUMN_LABELS
+)
+
+SUPPORTED_MASTER_EVIDENCE_FORMATS = frozenset({"csv", "xlsx", "json"})
+
+_WARNING_COLUMNS: Tuple[str, ...] = (
+    "Code",
+    "Message",
+    "Assignment ID",
+    "Assessment File",
+    "Student ID",
+    "Criterion ID",
+)
+
+_XLSX_HEADER_FILL = "4472C4"
+_XLSX_HEADER_FONT = "FFFFFF"
+
+
+def _export_scalar(value: Any) -> Any:
+    """Convert one normalized row value for CSV/XLSX without losing meaning."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return ";".join(str(item) for item in value if str(item).strip())
+    if isinstance(value, bool):
+        return value
+    return value
+
+
+def _tabular_row(row: Mapping[str, Any]) -> dict:
+    return {
+        label: _export_scalar(row.get(field))
+        for field, label in MASTER_EVIDENCE_COLUMN_LABELS
+    }
+
+
+def _student_key(row: Mapping[str, Any]) -> str:
+    return str(_nonblank(row.get("student_id"), row.get("student_name"), default=""))
+
+
+def _row_outcomes(row: Mapping[str, Any]) -> List[str]:
+    """Return the unique outcome IDs represented by a criterion row.
+
+    Program and ABET outcomes can be aliases in older/current rubric schemas, so
+    a row is counted only once for an outcome ID even if it appears in both.
+    """
+    outcomes: List[str] = []
+    for key in ("course_outcomes", "program_outcomes", "abet_outcomes"):
+        for outcome in _string_list(row.get(key)):
+            if outcome not in outcomes:
+                outcomes.append(outcome)
+    return outcomes
+
+
+def _mean(values: Iterable[Optional[float]]) -> Optional[float]:
+    usable = [float(value) for value in values if value is not None]
+    if not usable:
+        return None
+    return sum(usable) / len(usable)
+
+
+def build_master_evidence_outcome_summary(rows: Sequence[Mapping[str, Any]]) -> List[dict]:
+    """Build the XLSX pivot-like summary described by the v2.2.1 design."""
+    aggregates: Dict[str, dict] = {}
+    for row in rows:
+        for outcome in _row_outcomes(row):
+            bucket = aggregates.setdefault(outcome, {
+                "outcome": outcome,
+                "rows": 0,
+                "students": set(),
+                "total_earned": 0.0,
+                "total_possible": 0.0,
+                "percentages": [],
+            })
+            bucket["rows"] += 1
+            student = _student_key(row)
+            if student:
+                bucket["students"].add(student)
+            awarded = _number_or_none(row.get("points_awarded"))
+            possible = _number_or_none(row.get("points_possible"))
+            pct = _number_or_none(row.get("percentage"))
+            if awarded is not None:
+                bucket["total_earned"] += awarded
+            if possible is not None:
+                bucket["total_possible"] += possible
+            if pct is not None:
+                bucket["percentages"].append(pct)
+
+    result: List[dict] = []
+    for outcome in sorted(aggregates, key=str.casefold):
+        bucket = aggregates[outcome]
+        result.append({
+            "Outcome": outcome,
+            "Rows": bucket["rows"],
+            "Students": len(bucket["students"]),
+            "Total Earned": bucket["total_earned"],
+            "Total Possible": bucket["total_possible"],
+            "Average %": _mean(bucket["percentages"]),
+        })
+    return result
+
+
+def build_master_evidence_assignment_summary(rows: Sequence[Mapping[str, Any]]) -> List[dict]:
+    """Build assignment-level row counts and average criterion percentages."""
+    aggregates: Dict[str, dict] = {}
+    for row in rows:
+        assignment_id = str(row.get("assignment_id") or "")
+        assignment_title = str(row.get("assignment_title") or "")
+        key = assignment_id or assignment_title or "(unlabeled assignment)"
+        bucket = aggregates.setdefault(key, {
+            "assignment_id": assignment_id,
+            "assignment_title": assignment_title,
+            "rows": 0,
+            "students": set(),
+            "criteria": set(),
+            "outcomes": set(),
+            "percentages": [],
+        })
+        bucket["rows"] += 1
+        student = _student_key(row)
+        if student:
+            bucket["students"].add(student)
+        criterion = str(row.get("criterion_id") or row.get("criterion_title") or "")
+        if criterion:
+            bucket["criteria"].add(criterion)
+        bucket["outcomes"].update(_row_outcomes(row))
+        pct = _number_or_none(row.get("percentage"))
+        if pct is not None:
+            bucket["percentages"].append(pct)
+
+    result: List[dict] = []
+    for key in sorted(aggregates, key=str.casefold):
+        bucket = aggregates[key]
+        aid = bucket["assignment_id"]
+        title = bucket["assignment_title"]
+        if aid and title and aid != title:
+            display = f"{aid} — {title}"
+        else:
+            display = aid or title or key
+        result.append({
+            "Assignment": display,
+            "Rows": bucket["rows"],
+            "Students": len(bucket["students"]),
+            "Criteria": len(bucket["criteria"]),
+            "Outcomes Covered": ";".join(sorted(bucket["outcomes"], key=str.casefold)),
+            "Average %": _mean(bucket["percentages"]),
+        })
+    return result
+
+
+def _master_evidence_summary(rows: Sequence[Mapping[str, Any]]) -> dict:
+    students = {_student_key(row) for row in rows if _student_key(row)}
+    assignments = {
+        str(_nonblank(row.get("assignment_id"), row.get("assignment_title"), default=""))
+        for row in rows
+    }
+    assignments.discard("")
+    outcomes = sorted(
+        {outcome for row in rows for outcome in _row_outcomes(row)},
+        key=str.casefold,
+    )
+    return {
+        "num_rows": len(rows),
+        "num_students": len(students),
+        "num_assignments": len(assignments),
+        "outcomes_covered": outcomes,
+    }
+
+
+def _infer_course_metadata(
+    rows: Sequence[Mapping[str, Any]],
+    course_meta: Optional[Mapping[str, Any]],
+) -> dict:
+    supplied = course_meta or {}
+
+    def value_for(key: str) -> str:
+        if supplied.get(key) not in (None, ""):
+            return str(supplied.get(key))
+        for row in rows:
+            value = row.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return ""
+
+    return {
+        "semester": value_for("semester"),
+        "course_code": value_for("course_code"),
+        "course_name": value_for("course_name"),
+        "section": value_for("section"),
+    }
+
+
+def _infer_evidence_policy(
+    rows: Sequence[Mapping[str, Any]], evidence_policy: Optional[str]
+) -> str:
+    if evidence_policy:
+        if evidence_policy not in VALID_EVIDENCE_POLICIES:
+            raise ValueError(
+                f"Unsupported evidence policy {evidence_policy!r}; expected one of "
+                f"{sorted(VALID_EVIDENCE_POLICIES)}"
+            )
+        return evidence_policy
+    policies = {
+        str(row.get("evidence_policy") or "").strip()
+        for row in rows
+        if str(row.get("evidence_policy") or "").strip()
+    }
+    if len(policies) == 1:
+        return next(iter(policies))
+    if not policies:
+        return DEFAULT_POLICY
+    return "mixed"
+
+
+def _normalize_warning(warning: Mapping[str, Any]) -> dict:
+    return {
+        "Code": str(warning.get("code") or ""),
+        "Message": str(warning.get("message") or ""),
+        "Assignment ID": str(warning.get("assignment_id") or ""),
+        "Assessment File": str(warning.get("assessment_file") or ""),
+        "Student ID": str(warning.get("student_id") or ""),
+        "Criterion ID": str(warning.get("criterion_id") or ""),
+    }
+
+
+def _write_master_evidence_csv(rows: Sequence[Mapping[str, Any]], output_dir: Path) -> str:
+    path = output_dir / "master_abet_evidence.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(MASTER_EVIDENCE_EXPORT_COLUMNS))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_tabular_row(row))
+    return str(path)
+
+
+def _write_master_evidence_warnings_csv(
+    warnings: Sequence[Mapping[str, Any]], output_dir: Path
+) -> str:
+    path = output_dir / "master_abet_evidence_warnings.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(_WARNING_COLUMNS))
+        writer.writeheader()
+        for warning in warnings:
+            writer.writerow(_normalize_warning(warning))
+    return str(path)
+
+
+def _write_master_evidence_json(
+    rows: Sequence[Mapping[str, Any]],
+    warnings: Sequence[Mapping[str, Any]],
+    output_dir: Path,
+    *,
+    course_meta: Optional[Mapping[str, Any]],
+    evidence_policy: str,
+) -> str:
+    path = output_dir / "master_abet_evidence.json"
+    payload = {
+        "report_type": "master_abet_evidence",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "course": _infer_course_metadata(rows, course_meta),
+        "evidence_policy": evidence_policy,
+        "rows": [dict(row) for row in rows],
+        "warnings": [dict(warning) for warning in warnings],
+        "summary": _master_evidence_summary(rows),
+    }
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)
+    return str(path)
+
+
+def _xlsx_header(ws: Any, columns: Sequence[str]) -> None:
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    ws.append(list(columns))
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color=_XLSX_HEADER_FONT)
+        cell.fill = PatternFill("solid", fgColor=_XLSX_HEADER_FILL)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def _xlsx_auto_width(workbook: Any) -> None:
+    for ws in workbook.worksheets:
+        for col in ws.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                try:
+                    max_len = max(max_len, len(str(cell.value or "")))
+                except Exception:
+                    pass
+            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 10), 60)
+
+
+def _write_dict_sheet(ws: Any, columns: Sequence[str], rows: Sequence[Mapping[str, Any]]) -> None:
+    _xlsx_header(ws, columns)
+    for row in rows:
+        ws.append([_export_scalar(row.get(column)) for column in columns])
+    ws.freeze_panes = "A2"
+    if ws.max_column:
+        ws.auto_filter.ref = ws.dimensions
+
+
+def _write_master_evidence_xlsx(
+    rows: Sequence[Mapping[str, Any]],
+    warnings: Sequence[Mapping[str, Any]],
+    output_dir: Path,
+    *,
+    course_meta: Optional[Mapping[str, Any]],
+    evidence_policy: str,
+) -> Optional[str]:
+    try:
+        import openpyxl
+        from openpyxl.styles import Alignment
+    except ImportError:
+        return None
+
+    path = output_dir / "master_abet_evidence.xlsx"
+    workbook = openpyxl.Workbook()
+    evidence_ws = workbook.active
+    evidence_ws.title = "Evidence Rows"
+    _xlsx_header(evidence_ws, MASTER_EVIDENCE_EXPORT_COLUMNS)
+    for row in rows:
+        tabular = _tabular_row(row)
+        evidence_ws.append([tabular[column] for column in MASTER_EVIDENCE_EXPORT_COLUMNS])
+    evidence_ws.freeze_panes = "A2"
+    evidence_ws.auto_filter.ref = evidence_ws.dimensions
+
+    # Keep long narrative cells readable without forcing very wide sheets.
+    label_to_column = {
+        label: index + 1
+        for index, label in enumerate(MASTER_EVIDENCE_EXPORT_COLUMNS)
+    }
+    for label in ("Criterion Description", "Notes"):
+        column = label_to_column[label]
+        for row_index in range(2, evidence_ws.max_row + 1):
+            evidence_ws.cell(row=row_index, column=column).alignment = Alignment(
+                wrap_text=True, vertical="top"
+            )
+
+    outcome_ws = workbook.create_sheet("Outcome Summary")
+    outcome_rows = build_master_evidence_outcome_summary(rows)
+    _write_dict_sheet(
+        outcome_ws,
+        ["Outcome", "Rows", "Students", "Total Earned", "Total Possible", "Average %"],
+        outcome_rows,
+    )
+
+    assignment_ws = workbook.create_sheet("Assignment Summary")
+    assignment_rows = build_master_evidence_assignment_summary(rows)
+    _write_dict_sheet(
+        assignment_ws,
+        ["Assignment", "Rows", "Students", "Criteria", "Outcomes Covered", "Average %"],
+        assignment_rows,
+    )
+
+    warnings_ws = workbook.create_sheet("Warnings")
+    _xlsx_header(warnings_ws, _WARNING_COLUMNS)
+    for warning in warnings:
+        normalized = _normalize_warning(warning)
+        warnings_ws.append([normalized[column] for column in _WARNING_COLUMNS])
+    warnings_ws.freeze_panes = "A2"
+    warnings_ws.auto_filter.ref = warnings_ws.dimensions
+
+    readme_ws = workbook.create_sheet("README")
+    _xlsx_header(readme_ws, ["Field", "Description"])
+    course = _infer_course_metadata(rows, course_meta)
+    readme_rows = [
+        ("Report", "Master ABET Evidence Export"),
+        ("Evidence unit", "One row = student × assignment × rubric criterion."),
+        ("Evidence policy", evidence_policy),
+        ("Semester", course["semester"]),
+        ("Course", " ".join(part for part in [course["course_code"], course["course_name"]] if part)),
+        ("Section", course["section"]),
+        ("Selected / Counted", "Persisted grading flags. Blank means the historical assessment did not store the flag."),
+        ("Outcome/tag lists", "Semicolon-separated in CSV/XLSX; preserved as arrays in JSON."),
+        ("Submission metadata", "Optional v2.2 submission provenance. Blank when submission ingestion was not used."),
+        ("Performance Band", "Criterion-row band when a profile was available during row generation."),
+        ("Meets Target", "Intentionally blank at criterion-row level unless target semantics are explicitly defined."),
+        ("Warnings", f"{len(warnings)} non-fatal data-quality warning(s) were recorded."),
+    ]
+    for field_name, description in readme_rows:
+        readme_ws.append([field_name, description])
+    for row_index in range(2, readme_ws.max_row + 1):
+        readme_ws.cell(row=row_index, column=2).alignment = Alignment(wrap_text=True, vertical="top")
+
+    # Percentage columns are numeric values, not preformatted strings.
+    percentage_column = label_to_column["Percentage"]
+    for row_index in range(2, evidence_ws.max_row + 1):
+        cell = evidence_ws.cell(row=row_index, column=percentage_column)
+        if isinstance(cell.value, (int, float)):
+            cell.number_format = "0.00"
+    for ws in (outcome_ws, assignment_ws):
+        for cell in ws[1]:
+            if cell.value == "Average %":
+                col = cell.column
+                for row_index in range(2, ws.max_row + 1):
+                    target = ws.cell(row=row_index, column=col)
+                    if isinstance(target.value, (int, float)):
+                        target.number_format = "0.00"
+
+    _xlsx_auto_width(workbook)
+    workbook.save(path)
+    return str(path)
+
+
+def export_master_evidence(
+    rows: List[dict],
+    output_path: str,
+    formats: Sequence[str] = ("csv", "xlsx", "json"),
+    *,
+    warnings: Optional[Sequence[Mapping[str, Any]]] = None,
+    course_meta: Optional[Mapping[str, Any]] = None,
+    evidence_policy: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Export normalized master-evidence rows to CSV, XLSX, and/or JSON.
+
+    ``output_path`` is the destination directory.  The fixed release filenames
+    are ``master_abet_evidence.csv``, ``master_abet_evidence.xlsx``, and
+    ``master_abet_evidence.json``.  When CSV is requested and warnings exist, a
+    companion ``master_abet_evidence_warnings.csv`` is also written.
+
+    XLSX is optional: if ``openpyxl`` is unavailable, the returned ``xlsx``
+    value is ``None`` while other requested formats still succeed.
+    """
+    if not isinstance(rows, list):
+        raise ValueError("rows must be a list of normalized evidence dictionaries")
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"rows[{index}] must be a dictionary")
+
+    requested: List[str] = []
+    for raw_format in formats:
+        fmt = str(raw_format).strip().lower()
+        if not fmt:
+            continue
+        if fmt not in SUPPORTED_MASTER_EVIDENCE_FORMATS:
+            raise ValueError(
+                f"Unsupported export format {raw_format!r}; expected one of "
+                f"{sorted(SUPPORTED_MASTER_EVIDENCE_FORMATS)}"
+            )
+        if fmt not in requested:
+            requested.append(fmt)
+    if not requested:
+        raise ValueError("At least one export format is required")
+
+    normalized_warnings = [dict(w) for w in (warnings or [])]
+    policy = _infer_evidence_policy(rows, evidence_policy)
+    output_dir = Path(output_path).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not output_dir.is_dir():
+        raise NotADirectoryError(str(output_dir))
+    output_dir = output_dir.resolve()
+
+    exported: Dict[str, Optional[str]] = {}
+    for fmt in requested:
+        if fmt == "csv":
+            exported["csv"] = _write_master_evidence_csv(rows, output_dir)
+            if normalized_warnings:
+                exported["warnings_csv"] = _write_master_evidence_warnings_csv(
+                    normalized_warnings, output_dir
+                )
+        elif fmt == "json":
+            exported["json"] = _write_master_evidence_json(
+                rows,
+                normalized_warnings,
+                output_dir,
+                course_meta=course_meta,
+                evidence_policy=policy,
+            )
+        elif fmt == "xlsx":
+            exported["xlsx"] = _write_master_evidence_xlsx(
+                rows,
+                normalized_warnings,
+                output_dir,
+                course_meta=course_meta,
+                evidence_policy=policy,
+            )
+    return exported
+
+
 __all__ = [
     "MASTER_EVIDENCE_FIELDS",
+    "MASTER_EVIDENCE_COLUMN_LABELS",
+    "MASTER_EVIDENCE_EXPORT_COLUMNS",
+    "SUPPORTED_MASTER_EVIDENCE_FORMATS",
     "MasterEvidenceBuildResult",
     "VALID_EVIDENCE_POLICIES",
     "build_master_evidence_rows_for_assessment",
@@ -1101,4 +1629,7 @@ __all__ = [
     "collect_master_evidence_for_semester",
     "build_master_evidence_rows_for_semester_config",
     "collect_master_evidence_for_semester_config",
+    "build_master_evidence_outcome_summary",
+    "build_master_evidence_assignment_summary",
+    "export_master_evidence",
 ]
