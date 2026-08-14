@@ -50,6 +50,7 @@ class QuestionSimilarity:
     flag_level: str = "none"
     warnings: list[str] = field(default_factory=list)
     embedding_cosine: float | None = None
+    pseudocode_similarity: float | None = None
     advanced_flags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -62,6 +63,15 @@ class QuestionSimilarity:
             self.embedding_cosine = float(self.embedding_cosine)
             if not math.isfinite(self.embedding_cosine) or not 0.0 <= self.embedding_cosine <= 1.0:
                 raise ValueError("QuestionSimilarity.embedding_cosine must be between 0 and 1.")
+        if self.pseudocode_similarity is not None:
+            self.pseudocode_similarity = float(self.pseudocode_similarity)
+            if (
+                not math.isfinite(self.pseudocode_similarity)
+                or not 0.0 <= self.pseudocode_similarity <= 1.0
+            ):
+                raise ValueError(
+                    "QuestionSimilarity.pseudocode_similarity must be between 0 and 1."
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -82,6 +92,7 @@ class PairSimilarity:
     signals: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     embedding_max_similarity: float | None = None
+    pseudocode_max_similarity: float | None = None
 
     def __post_init__(self) -> None:
         self.student_a = str(self.student_a or "").strip()
@@ -102,6 +113,15 @@ class PairSimilarity:
             ):
                 raise ValueError(
                     "PairSimilarity.embedding_max_similarity must be between 0 and 1."
+                )
+        if self.pseudocode_max_similarity is not None:
+            self.pseudocode_max_similarity = float(self.pseudocode_max_similarity)
+            if (
+                not math.isfinite(self.pseudocode_max_similarity)
+                or not 0.0 <= self.pseudocode_max_similarity <= 1.0
+            ):
+                raise ValueError(
+                    "PairSimilarity.pseudocode_max_similarity must be between 0 and 1."
                 )
 
     def to_dict(self) -> dict[str, Any]:

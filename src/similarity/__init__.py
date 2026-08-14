@@ -1,8 +1,8 @@
 """Submission-similarity review primitives.
 
 v2.3.0 deterministic signals remain the foundation. v2.3.1 extends this
-package with optional semantic-embedding primitives while keeping provider
-dependencies isolated and automated tests fully offline.
+package with optional semantic-embedding and pseudocode-structure signals
+while keeping automated tests fully offline.
 """
 
 from .compare import (
@@ -63,6 +63,16 @@ from .models import (
     SimilaritySignal,
 )
 from .normalize import normalize_for_similarity
+from .pseudocode import (
+    DEFAULT_PSEUDOCODE_THRESHOLDS,
+    PSEUDOCODE_REVIEW_WARNING,
+    compute_question_pseudocode_similarity,
+    extract_pseudocode_blocks,
+    normalize_pseudocode,
+    pseudocode_flag_for_score,
+    pseudocode_similarity,
+    resolve_pseudocode_thresholds,
+)
 from .report import DEFAULT_METHODS, generate_similarity_report
 from .shingles import (
     jaccard_similarity,
@@ -86,6 +96,14 @@ __all__ = [
     "DEFAULT_EMBEDDING_THRESHOLDS",
     "DEFAULT_LOW_TEXTUAL_OVERLAP_THRESHOLD",
     "DEFAULT_EMBEDDING_SHORT_ANSWER_TOKEN_THRESHOLD",
+    "DEFAULT_PSEUDOCODE_THRESHOLDS",
+    "PSEUDOCODE_REVIEW_WARNING",
+    "extract_pseudocode_blocks",
+    "normalize_pseudocode",
+    "pseudocode_similarity",
+    "compute_question_pseudocode_similarity",
+    "resolve_pseudocode_thresholds",
+    "pseudocode_flag_for_score",
     "compute_question_embedding_similarity",
     "cosine_similarity",
     "embedding_flag_for_score",
