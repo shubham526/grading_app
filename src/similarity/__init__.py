@@ -4,6 +4,12 @@ This package intentionally contains no LLM, embedding, OCR, network, or
 misconduct-classification logic.
 """
 
+from .compare import (
+    DEFAULT_THRESHOLDS,
+    SHORT_ANSWER_TOKEN_THRESHOLD,
+    compare_submissions,
+    compute_question_ngram_similarity,
+)
 from .hashing import compute_file_sha256, compute_text_sha256
 from .models import (
     FLAG_LEVELS,
@@ -14,7 +20,11 @@ from .models import (
     SimilaritySignal,
 )
 from .normalize import normalize_for_similarity
-from .shingles import jaccard_similarity, make_word_shingles, tokenize_for_similarity
+from .shingles import (
+    jaccard_similarity,
+    make_word_shingles,
+    tokenize_for_similarity,
+)
 
 __all__ = [
     "FLAG_LEVELS",
@@ -23,6 +33,10 @@ __all__ = [
     "QuestionSimilarity",
     "PairSimilarity",
     "SimilarityReport",
+    "DEFAULT_THRESHOLDS",
+    "SHORT_ANSWER_TOKEN_THRESHOLD",
+    "compare_submissions",
+    "compute_question_ngram_similarity",
     "compute_file_sha256",
     "compute_text_sha256",
     "normalize_for_similarity",
