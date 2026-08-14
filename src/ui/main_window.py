@@ -21,6 +21,7 @@ import time
 from src.ui.dialogs.abet_dialogs import (
     ABETMappingDialog, ABETReportDialog, SemesterABETReportDialog,
 )
+from src.ui.dialogs.master_evidence_export_dialog import MasterEvidenceExportDialog
 
 from PyQt5.QtWidgets import (
     QAction, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -302,6 +303,15 @@ class RubricGrader(QMainWindow):
         self.semester_abet_btn = QAction(qta.icon('fa5s.calendar-alt'), "Semester Report", self)
         self.semester_abet_btn.triggered.connect(self.show_semester_abet_report)
         reports_menu.addAction(self.semester_abet_btn)
+
+        self.master_evidence_btn = QAction(
+            qta.icon('fa5s.table'), "Master ABET Evidence Sheet", self
+        )
+        self.master_evidence_btn.setToolTip(
+            "Export row-level ABET evidence for one assignment or a full semester"
+        )
+        self.master_evidence_btn.triggered.connect(self.show_master_abet_evidence_export)
+        reports_menu.addAction(self.master_evidence_btn)
         reports_menu.addSeparator()
 
         self.export_btn = QAction(qta.icon('fa5s.file-export'), "Export Current Assessment to PDF", self)
@@ -895,19 +905,60 @@ class RubricGrader(QMainWindow):
         return self.submission_controller.set_evidence_root(None)
 
     def _active_submission_student_id(self):
-        """Return the student identifier that owns the visible evidence context."""
+        """Return the student identifier that owns the visible evidence context.
+
+        Roster/assessment-folder loading establishes a current student even in
+        student-centric mode.  Prefer that stable roster ID while the visible
+        name still corresponds to the current record; otherwise preserve the
+        legacy manual-name workflow.
+        """
+        record = self._current_student_record() if self.student_records else None
+        name = self.student_name_edit.text().strip() if hasattr(self, "student_name_edit") else ""
+
         if self.workflow_mode == QUESTION_CENTRIC:
-            record = self._current_student_record() if self.student_records else None
             if record is not None and record.student_id:
                 return record.student_id
+        elif record is not None and record.student_id and (
+            not name or name == record.student_name
+        ):
+            return record.student_id
+
+        if self.workflow_mode == STUDENT_CENTRIC and name:
+            return safe_student_filename(name)
 
         if self.current_submission is not None and getattr(self.current_submission, "student_id", None):
             return self.current_submission.student_id
 
-        name = self.student_name_edit.text().strip() if hasattr(self, "student_name_edit") else ""
-        if name:
-            return safe_student_filename(name)
         return self.submission_controller.current_student_id
+
+    def _sync_student_centric_record_context(self, *, load_persisted=True):
+        """Immediately expose the current roster student's submission evidence.
+
+        Loading a roster or assessment folder should not require a temporary
+        switch to question-by-question mode before the submission pane updates.
+        This helper changes evidence/session context only; it does not alter
+        scores or criterion widgets.
+        """
+        if self.workflow_mode != STUDENT_CENTRIC:
+            return None
+
+        record = self._current_student_record()
+        assessment_data = None
+        if record is not None:
+            self.student_name_edit.setText(record.student_name)
+            if record.assessment_path:
+                try:
+                    assessment_data = self._read_assessment_file(record.assessment_path)
+                except (OSError, ValueError):
+                    # Optional evidence metadata must never make roster loading
+                    # fail. Normal assessment loading still reports malformed
+                    # files through its existing paths.
+                    assessment_data = None
+
+        return self._sync_submission_context(
+            assessment_data,
+            load_persisted=load_persisted,
+        )
 
     def _notify_submission_context_changed(self):
         """Synchronize the visible evidence workspace with session context."""
@@ -2028,6 +2079,10 @@ class RubricGrader(QMainWindow):
             if self.workflow_mode == QUESTION_CENTRIC and self.student_records:
                 self.load_question_mode_student(self.current_student_index)
             else:
+                if self.student_records:
+                    self._sync_student_centric_record_context(load_persisted=True)
+                else:
+                    self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
         except Exception as e:
             QMessageBox.critical(self, "Assessment Folder Error", str(e))
@@ -2064,6 +2119,10 @@ class RubricGrader(QMainWindow):
             if self.workflow_mode == QUESTION_CENTRIC and self.student_records:
                 self.load_question_mode_student(self.current_student_index)
             else:
+                if self.student_records:
+                    self._sync_student_centric_record_context(load_persisted=True)
+                else:
+                    self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
         except Exception as e:
             QMessageBox.critical(self, "Roster Error", f"Failed to load roster: {str(e)}")
@@ -2992,4 +3051,44 @@ class RubricGrader(QMainWindow):
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Failed to open Semester ABET Report dialog:\n{str(e)}"
+            )
+
+    def show_master_abet_evidence_export(self):
+        """Open the v2.2.1 master evidence export UI using current assignment context."""
+        try:
+            rubric = self.rubric_data or {}
+            assignment_title = ""
+            try:
+                assignment_title = self.assignment_name_edit.text().strip()
+            except Exception:
+                assignment_title = ""
+            if not assignment_title:
+                assignment_title = str(rubric.get("title") or "")
+
+            defaults = {
+                "rubric_path": self.rubric_file_path or "",
+                "assessments_dir": self.assessments_dir or "",
+                "assignment_id": (
+                    rubric.get("assignment_id")
+                    or rubric.get("assessment_id")
+                    or ""
+                ),
+                "assignment_title": assignment_title,
+                "assignment_type": rubric.get("assignment_type") or "",
+                "assignment_date": rubric.get("assignment_date") or "",
+                "course_code": rubric.get("course_code") or "",
+                "course_name": rubric.get("course_name") or "",
+                "semester": rubric.get("semester") or "",
+                "section": rubric.get("section") or "",
+            }
+            dialog = MasterEvidenceExportDialog(
+                self,
+                assignment_defaults=defaults,
+            )
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open Master ABET Evidence export dialog:\n{str(e)}",
             )

@@ -132,6 +132,24 @@ class TestMainWindowSubmissionArchitecture(unittest.TestCase):
         self.assertIn("STUDENT_CENTRIC", source)
         self.assertIn("_sync_submission_context", source)
 
+    def test_student_centric_roster_context_prefers_stable_student_id(self):
+        source = _segment("_active_submission_student_id")
+        self.assertIn("_current_student_record", source)
+        self.assertIn("record.student_id", source)
+        self.assertIn("STUDENT_CENTRIC", source)
+
+    def test_roster_and_assessment_folder_immediately_refresh_student_centric_evidence(self):
+        for method_name in ("load_roster", "load_assessment_folder"):
+            source = _segment(method_name)
+            with self.subTest(method=method_name):
+                self.assertIn("_sync_student_centric_record_context", source)
+
+    def test_student_centric_sync_helper_does_not_modify_scores(self):
+        source = _segment("_sync_student_centric_record_context")
+        self.assertIn("_sync_submission_context", source)
+        for scoring_field in ("points_awarded", "points_possible", "selected", "counted"):
+            self.assertNotIn(scoring_field, source)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
