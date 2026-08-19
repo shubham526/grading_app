@@ -66,6 +66,11 @@ from src.ui.widgets.status_bar import StatusBarWidget
 from src.ui.widgets.card import CardWidget
 from src.ui.widgets.submission_workspace import SubmissionWorkspace
 from src.ui.submission_controller import SubmissionController
+from src.grading_session import (
+    GradingSessionCheckpoint,
+    load_grading_session_checkpoint,
+    save_grading_session_checkpoint,
+)
 from src.ui.workers.submission_worker import (
     SubmissionOperation,
     SubmissionWorker,
@@ -163,6 +168,8 @@ class RubricGrader(QMainWindow):
         self._changing_workflow_mode = False
         self._changing_question_combo = False
         self._changing_student_combo = False
+        self._restoring_grading_session = False
+        self._resume_checkpoint_prompted_for = set()
 
         self.student_name = ""
         self.assignment_name = ""
@@ -363,6 +370,15 @@ class RubricGrader(QMainWindow):
         self.submission_history_action.triggered.connect(self.show_submission_history)
         tools_menu.addAction(self.submission_history_action)
 
+        self.resume_grading_session_action = QAction(
+            qta.icon('fa5s.play-circle'), "Resume Grading Session", self
+        )
+        self.resume_grading_session_action.setToolTip(
+            "Resume the last saved question/student position for the current assessment workspace"
+        )
+        self.resume_grading_session_action.triggered.connect(self.resume_grading_session)
+        tools_menu.addAction(self.resume_grading_session_action)
+
         self.tools_menu_button = QToolButton()
         self.tools_menu_button.setText("Tools")
         self.tools_menu_button.setIcon(qta.icon('fa5s.tools'))
@@ -535,16 +551,17 @@ class RubricGrader(QMainWindow):
         student_row.addWidget(self.next_student_btn)
         student_row.addSpacing(10)
 
-        self.save_question_btn = QPushButton("Save")
+        self.save_question_btn = QPushButton("Save Question")
         self.save_question_btn.setIcon(qta.icon('fa5s.save'))
         self.save_question_btn.setProperty("buttonRole", "primary")
+        self.save_question_btn.setToolTip("Save the current question for the current student")
         self.save_question_btn.clicked.connect(
             lambda: self.save_current_question(show_success=True)
         )
         student_row.addWidget(self.save_question_btn)
 
         self.save_next_student_btn = QPushButton("Save + Next")
-        self.save_next_student_btn.setToolTip("Save this question and move to the next student")
+        self.save_next_student_btn.setToolTip("Save the current question and move to the next student")
         self.save_next_student_btn.clicked.connect(self.save_and_next_student)
         student_row.addWidget(self.save_next_student_btn)
 
@@ -728,9 +745,19 @@ class RubricGrader(QMainWindow):
         self.save_assessment_btn = QPushButton("Save Assessment")
         self.save_assessment_btn.setIcon(qta.icon('fa5s.save'))
         self.save_assessment_btn.setProperty("buttonRole", "primary")
-        self.save_assessment_btn.setToolTip("Save assessment to a file")
+        self.save_assessment_btn.setToolTip(
+            "Save the complete current student's assessment to its current assessment file"
+        )
         self.save_assessment_btn.clicked.connect(self.save_assessment)
         bottom_layout.addWidget(self.save_assessment_btn)
+
+        self.save_assessment_as_btn = QPushButton("Save Assessment As…")
+        self.save_assessment_as_btn.setIcon(qta.icon('fa5s.file-export'))
+        self.save_assessment_as_btn.setToolTip(
+            "Save the complete current student's assessment to a new file/location"
+        )
+        self.save_assessment_as_btn.clicked.connect(self.save_assessment_as)
+        bottom_layout.addWidget(self.save_assessment_as_btn)
 
         load_assessment_btn = QPushButton("Load Assessment")
         load_assessment_btn.setIcon(qta.icon('fa5s.file-upload'))
@@ -875,7 +902,10 @@ class RubricGrader(QMainWindow):
         next_student.setVisible(self.workflow_mode == QUESTION_CENTRIC)
         header_layout.addWidget(next_student)
 
-        save_button = QPushButton("Save", popout_header)
+        save_button = QPushButton(
+            "Save Question" if self.workflow_mode == QUESTION_CENTRIC else "Save Assessment",
+            popout_header,
+        )
         save_button.setProperty("buttonRole", "primary")
         save_button.clicked.connect(
             lambda: self.save_current_question(show_success=True)
@@ -888,6 +918,11 @@ class RubricGrader(QMainWindow):
             save_next = QPushButton("Save + Next", popout_header)
             save_next.clicked.connect(self.save_and_next_student)
             header_layout.addWidget(save_next)
+
+            save_assessment = QPushButton("Save Assessment", popout_header)
+            save_assessment.setToolTip("Save the complete current student's assessment")
+            save_assessment.clicked.connect(self.save_assessment)
+            header_layout.addWidget(save_assessment)
 
         reattach = QPushButton("Reattach", popout_header)
         reattach.clicked.connect(self._reattach_grading_workspace)
@@ -2003,6 +2038,115 @@ class RubricGrader(QMainWindow):
         splitter.setSizes([first, second])
 
     # ------------------------------------------------------------------
+    # Resumable grading-session checkpoint
+    # ------------------------------------------------------------------
+
+    def _current_assessment_id(self):
+        rubric = self.rubric_data or {}
+        value = rubric.get("assessment_id") or rubric.get("assignment_id")
+        value = str(value or "").strip()
+        return value or None
+
+    def _write_grading_session_checkpoint(self):
+        if self._restoring_grading_session or self.workflow_mode != QUESTION_CENTRIC:
+            return False
+        assessment_id = self._current_assessment_id()
+        record = self._current_student_record()
+        if not assessment_id or not self.assessments_dir or not self.current_question_id or record is None:
+            return False
+        try:
+            save_grading_session_checkpoint(
+                self.assessments_dir, assessment_id, self.current_question_id,
+                record.student_id, workflow_mode=QUESTION_CENTRIC,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _available_grading_session_checkpoint(self):
+        assessment_id = self._current_assessment_id()
+        if not assessment_id or not self.assessments_dir:
+            return None
+        try:
+            checkpoint = load_grading_session_checkpoint(self.assessments_dir, assessment_id)
+        except Exception:
+            return None
+        if checkpoint is None or checkpoint.workflow_mode != QUESTION_CENTRIC:
+            return None
+        valid_questions = set(get_question_ids(self.rubric_data or {}, include_unassigned=True))
+        valid_students = {record.student_id for record in self.student_records}
+        if checkpoint.question_id not in valid_questions or checkpoint.student_id not in valid_students:
+            return None
+        return checkpoint
+
+    def _restore_grading_session_checkpoint(self, checkpoint):
+        if not isinstance(checkpoint, GradingSessionCheckpoint):
+            return False
+        student_index = next((i for i, record in enumerate(self.student_records)
+                              if record.student_id == checkpoint.student_id), -1)
+        question_index = self.question_combo.findData(checkpoint.question_id)
+        if student_index < 0 or question_index < 0:
+            return False
+        if self.workflow_mode == QUESTION_CENTRIC and self.question_mode_dirty:
+            if not self._confirm_dirty_navigation("resume the saved grading session"):
+                return False
+        self._restoring_grading_session = True
+        try:
+            self.workflow_mode = QUESTION_CENTRIC
+            self._set_workflow_combo(QUESTION_CENTRIC)
+            self.current_question_id = checkpoint.question_id
+            self.current_student_index = student_index
+            self._changing_question_combo = True
+            try:
+                self.question_combo.setCurrentIndex(question_index)
+            finally:
+                self._changing_question_combo = False
+            self._populate_student_combo()
+            self.apply_current_workflow_view()
+            record = self._current_student_record()
+            label = record.student_name if record is not None else checkpoint.student_id
+            self.status_bar.set_status(f"Resumed grading session: {checkpoint.question_id} — {label}")
+            self.status_bar.show_temporary_message("Previous grading position restored")
+            return True
+        finally:
+            self._restoring_grading_session = False
+
+    def _maybe_offer_resume_grading_session(self, allow_without_roster=False):
+        if self._restoring_grading_session:
+            return False
+        if not allow_without_roster and not self.roster_records:
+            return False
+        checkpoint = self._available_grading_session_checkpoint()
+        if checkpoint is None:
+            return False
+        prompt_key = (checkpoint.assessment_id, checkpoint.saved_at)
+        if prompt_key in self._resume_checkpoint_prompted_for:
+            return False
+        self._resume_checkpoint_prompted_for.add(prompt_key)
+        record = next((record for record in self.student_records
+                       if record.student_id == checkpoint.student_id), None)
+        student_label = record.student_name if record is not None else checkpoint.student_id
+        reply = QMessageBox.question(
+            self, "Resume Grading Session",
+            f"Resume the previous question-by-question grading session at "
+            f"{checkpoint.question_id} — {student_label}?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        return self._restore_grading_session_checkpoint(checkpoint)
+
+    def resume_grading_session(self):
+        checkpoint = self._available_grading_session_checkpoint()
+        if checkpoint is None:
+            QMessageBox.information(
+                self, "Resume Grading Session",
+                "No resumable grading session was found for the current rubric, workspace, and roster.",
+            )
+            return False
+        return self._restore_grading_session_checkpoint(checkpoint)
+
+    # ------------------------------------------------------------------
     # Rubric loading / existing grading config
     # ------------------------------------------------------------------
 
@@ -2074,6 +2218,7 @@ class RubricGrader(QMainWindow):
 
             if show_config_on_load:
                 self.show_grading_config()
+            self._maybe_offer_resume_grading_session()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load rubric: {str(e)}")
 
@@ -2184,6 +2329,10 @@ class RubricGrader(QMainWindow):
             self._set_workflow_combo(self.workflow_mode)
             return
 
+        if requested == QUESTION_CENTRIC:
+            if self._maybe_offer_resume_grading_session(allow_without_roster=True):
+                return
+
         if self.workflow_mode == QUESTION_CENTRIC and self.question_mode_dirty:
             if not self._confirm_dirty_navigation("switch grading workflows"):
                 self._set_workflow_combo(self.workflow_mode)
@@ -2191,6 +2340,8 @@ class RubricGrader(QMainWindow):
 
         self.workflow_mode = requested
         self.apply_current_workflow_view()
+        if requested == QUESTION_CENTRIC:
+            self._write_grading_session_checkpoint()
 
     def _set_workflow_combo(self, mode):
         self._changing_workflow_mode = True
@@ -2300,6 +2451,7 @@ class RubricGrader(QMainWindow):
                 else:
                     self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
+            self._maybe_offer_resume_grading_session()
         except Exception as e:
             QMessageBox.critical(self, "Assessment Folder Error", str(e))
 
@@ -2340,6 +2492,7 @@ class RubricGrader(QMainWindow):
                 else:
                     self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
+            self._maybe_offer_resume_grading_session()
         except Exception as e:
             QMessageBox.critical(self, "Roster Error", f"Failed to load roster: {str(e)}")
 
@@ -2662,6 +2815,7 @@ class RubricGrader(QMainWindow):
             self.current_assessment_path = target_path
             record.assessment_path = target_path
             self.question_mode_dirty = False
+            self._write_grading_session_checkpoint()
             self.update_question_progress_display()
             self.status_bar.set_status(f"Saved to: {os.path.basename(target_path)}")
             self.status_bar.show_temporary_message(
@@ -2760,7 +2914,8 @@ class RubricGrader(QMainWindow):
             return
 
         self.current_student_index = new_index
-        self.load_question_mode_student(new_index)
+        if self.load_question_mode_student(new_index):
+            self._write_grading_session_checkpoint()
 
     def navigate_student(self, delta):
         if self.workflow_mode != QUESTION_CENTRIC or not self.student_records:
@@ -2772,7 +2927,8 @@ class RubricGrader(QMainWindow):
         if self.question_mode_dirty and not self.save_current_question(show_success=False):
             return
         self.current_student_index = target
-        self.load_question_mode_student(target)
+        if self.load_question_mode_student(target):
+            self._write_grading_session_checkpoint()
 
     def _move_student_after_save(self, delta):
         if not self.student_records:
@@ -2780,7 +2936,8 @@ class RubricGrader(QMainWindow):
         target = self.current_student_index + delta
         if 0 <= target < len(self.student_records):
             self.current_student_index = target
-            self.load_question_mode_student(target)
+            if self.load_question_mode_student(target):
+                self._write_grading_session_checkpoint()
         else:
             self.status_bar.show_temporary_message("Reached the end of the student list")
 
@@ -2810,6 +2967,7 @@ class RubricGrader(QMainWindow):
         apply_workflow_question_filter(self, requested)
         self._update_question_navigation_buttons()
         self.update_question_progress_display()
+        self._write_grading_session_checkpoint()
 
     def navigate_question(self, delta):
         if self.workflow_mode != QUESTION_CENTRIC or self.question_combo.count() == 0:
@@ -2847,6 +3005,7 @@ class RubricGrader(QMainWindow):
 
         self._update_question_navigation_buttons()
         self.update_question_progress_display()
+        self._write_grading_session_checkpoint()
 
     def _update_student_navigation_buttons(self):
         count = len(self.student_records)
@@ -3000,51 +3159,98 @@ class RubricGrader(QMainWindow):
     # Save/load assessment: old path preserved; question mode routes partial
     # ------------------------------------------------------------------
 
-    def save_assessment(self):
-        if self.workflow_mode == QUESTION_CENTRIC:
-            self.save_current_question(show_success=True)
-            return
-
+    def _build_complete_current_assessment(self):
+        """Return a complete current-student snapshot in either workflow mode."""
         if not self.criterion_widgets:
             QMessageBox.warning(self, "Warning", "No rubric loaded to save.")
-            return
-
-        assessment_data = get_assessment_data(self)
+            return None
+        assessment_data = get_assessment_data(
+            self, validate=(self.workflow_mode != QUESTION_CENTRIC)
+        )
         if not assessment_data:
-            return
+            return None
         assessment_data = self._merge_current_submission_into_assessment(assessment_data)
+        if self.workflow_mode == QUESTION_CENTRIC:
+            record = self._current_student_record()
+            if record is not None:
+                assessment_data["student_name"] = record.student_name
+                assessment_data["student_id"] = record.student_id
+                assessment_data = update_grading_progress_metadata(
+                    assessment_data, mode=QUESTION_CENTRIC,
+                    question_id=self.current_question_id, student_id=record.student_id,
+                    question_complete=None,
+                )
+        return assessment_data
 
-        default_path = ""
+    def _current_assessment_save_path(self):
+        record = self._current_student_record()
+        if record is not None:
+            if not record.assessment_path and self.assessments_dir:
+                record.assessment_path = assessment_path_for_student(record, self.assessments_dir)
+            if record.assessment_path:
+                return os.path.abspath(record.assessment_path)
         if self.current_assessment_path:
-            default_path = self.current_assessment_path
-        else:
+            return os.path.abspath(self.current_assessment_path)
+        return None
+
+    def _write_complete_assessment(self, file_path, assessment_data, show_success=True):
+        if not file_path:
+            return False
+        if not str(file_path).lower().endswith('.json'):
+            file_path = f"{file_path}.json"
+        file_path = os.path.abspath(file_path)
+        try:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as file:
+                json.dump(assessment_data, file, indent=2, ensure_ascii=False)
+            self.current_assessment_path = file_path
+            record = self._current_student_record()
+            if record is not None:
+                record.assessment_path = file_path
+            if self.workflow_mode == QUESTION_CENTRIC:
+                self.question_mode_dirty = False
+                self._write_grading_session_checkpoint()
+            self.update_question_progress_display()
+            self.status_bar.set_status(f"Saved to: {os.path.basename(file_path)}")
+            self.status_bar.show_temporary_message("Assessment saved successfully")
+            if show_success:
+                QMessageBox.information(self, "Success", "Assessment saved successfully.")
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save assessment: {str(e)}")
+            return False
+
+    def save_assessment(self):
+        """Save the complete current student's assessment in either workflow mode."""
+        assessment_data = self._build_complete_current_assessment()
+        if assessment_data is None:
+            return False
+        target_path = self._current_assessment_save_path()
+        if not target_path:
+            return self.save_assessment_as(assessment_data=assessment_data)
+        return self._write_complete_assessment(target_path, assessment_data, show_success=True)
+
+    def save_assessment_as(self, assessment_data=None):
+        """Save the complete current student's assessment to a chosen path."""
+        if assessment_data is None:
+            assessment_data = self._build_complete_current_assessment()
+        if assessment_data is None:
+            return False
+        default_path = self._current_assessment_save_path() or ""
+        if not default_path:
             student = self.student_name_edit.text()
             assignment = self.assignment_name_edit.text()
             if student and assignment:
                 safe_student = ''.join(c if c.isalnum() else '_' for c in student)
                 safe_assignment = ''.join(c if c.isalnum() else '_' for c in assignment)
                 default_path = f"{safe_assignment}_{safe_student}.json"
-
         file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Assessment",
-            default_path,
+            self, "Save Assessment As", default_path,
             "JSON Files (*.json);;All Files (*)",
         )
         if not file_path:
-            return
-        if not file_path.lower().endswith('.json'):
-            file_path += '.json'
-
-        try:
-            with open(file_path, 'w', encoding='utf-8') as file:
-                json.dump(assessment_data, file, indent=2, ensure_ascii=False)
-            self.current_assessment_path = file_path
-            self.status_bar.set_status(f"Saved to: {os.path.basename(file_path)}")
-            self.status_bar.show_temporary_message("Assessment saved successfully")
-            QMessageBox.information(self, "Success", "Assessment saved successfully.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save assessment: {str(e)}")
+            return False
+        return self._write_complete_assessment(file_path, assessment_data, show_success=True)
 
     def load_assessment(self):
         file_path, _ = QFileDialog.getOpenFileName(

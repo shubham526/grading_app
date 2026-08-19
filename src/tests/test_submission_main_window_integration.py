@@ -99,14 +99,21 @@ class TestMainWindowSubmissionArchitecture(unittest.TestCase):
         self.assertIn("_sync_submission_context(load_persisted=True)", source)
 
     def test_all_three_save_paths_attach_optional_submission_fields(self):
+        # Question-level and autosave paths merge submission fields directly.
         for method_name in (
             "save_current_question",
-            "save_assessment",
             "auto_save_assessment",
         ):
             calls = _called_attribute_names(_method(method_name))
             with self.subTest(method=method_name):
                 self.assertIn("_merge_current_submission_into_assessment", calls)
+
+        # Full Save Assessment now delegates snapshot construction so its behavior
+        # stays identical in student- and question-centric workflows.
+        save_calls = _called_attribute_names(_method("save_assessment"))
+        self.assertIn("_build_complete_current_assessment", save_calls)
+        builder_calls = _called_attribute_names(_method("_build_complete_current_assessment"))
+        self.assertIn("_merge_current_submission_into_assessment", builder_calls)
 
     def test_submission_merge_helper_cannot_touch_scoring_fields(self):
         source = _segment("_merge_current_submission_into_assessment")
