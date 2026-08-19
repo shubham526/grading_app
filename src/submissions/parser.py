@@ -169,6 +169,39 @@ def _parse_record(
     return parsed
 
 
+def parse_submission_record(
+    record: SubmissionRecord,
+    question_ids: Optional[Sequence[str]] = None,
+    *,
+    compile_pdf: bool = True,
+    compilation_dir: Optional[str] = None,
+    compiler_options: Optional[Dict[str, Any]] = None,
+    evidence_dir: Optional[str] = None,
+) -> ParsedSubmission:
+    """Parse one explicit normal-LaTeX ``SubmissionRecord``.
+
+    This public wrapper exists so the v2.3.2 canonical bridge can preserve the
+    canonical ``student_id`` even though immutable artifact filenames are
+    intentionally opaque.  It delegates to the unchanged v2.2 parser logic.
+    """
+    if not isinstance(record, SubmissionRecord):
+        raise TypeError("record must be SubmissionRecord")
+    if record.accommodation_mode or record.submission_mode != SUBMISSION_MODE_LATEX:
+        raise ValueError(
+            "parse_submission_record accepts normal LaTeX records only; "
+            "use parse_pdf_accommodation for explicit PDF accommodations."
+        )
+
+    return _parse_record(
+        record,
+        question_ids=question_ids,
+        compile_pdf=compile_pdf,
+        compilation_dir=compilation_dir,
+        compiler_options=compiler_options,
+        evidence_dir=evidence_dir,
+    )
+
+
 def _parse_pdf_accommodation_record(
     record: SubmissionRecord,
     *,
@@ -484,9 +517,9 @@ def parse_submission(
     else:
         raise ValueError(f"Unsupported submission path: {path}")
 
-    return _parse_record(
+    return parse_submission_record(
         record,
-        question_ids=question_ids,
+        question_ids,
         compile_pdf=compile_pdf,
         compilation_dir=compilation_dir,
         compiler_options=compiler_options,
@@ -510,9 +543,9 @@ def parse_submissions_folder(
     """
     parsed: Dict[str, ParsedSubmission] = {}
     for record in discover_submissions(submissions_dir):
-        parsed[record.student_id] = _parse_record(
+        parsed[record.student_id] = parse_submission_record(
             record,
-            question_ids=question_ids,
+            question_ids,
             compile_pdf=compile_pdf,
             compilation_dir=compilation_dir,
             compiler_options=compiler_options,
@@ -580,5 +613,6 @@ __all__ = [
     "parse_pdf_accommodation",
     "parse_pdf_accommodations",
     "parse_submission",
+    "parse_submission_record",
     "parse_submissions_folder",
 ]

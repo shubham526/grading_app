@@ -77,6 +77,7 @@ from .parser import (
     parse_pdf_accommodation,
     parse_pdf_accommodations,
     parse_submission,
+    parse_submission_record,
     parse_submissions_folder,
 )
 from .pdf import (
@@ -102,6 +103,28 @@ from .repository import (
     CanonicalStoragePaths,
     SubmissionRepository,
     canonical_storage_paths,
+)
+from .routing import (
+    HANDLER_LATEX_PROJECT,
+    HANDLER_LEGACY_LATEX,
+    HANDLER_NONE,
+    HANDLER_PDF_ACCOMMODATION,
+    HANDLER_PROGRAMMING,
+    ROUTE_LATEX_PROJECT,
+    ROUTE_LATEX_SINGLE_SOURCE,
+    ROUTE_MIXED,
+    ROUTE_PROGRAMMING_PYTHON,
+    ROUTE_UNSUPPORTED,
+    ROUTE_WRITTEN_PDF,
+    RouteDecision,
+    route_submission,
+)
+from .bridge import (
+    CanonicalArtifactVerificationError,
+    CanonicalSubmissionBridgeError,
+    ExplicitAccommodationRequiredError,
+    SubmissionHandlerUnavailableError,
+    parse_canonical_submission,
 )
 from .sources import (
     LocalFileSourceAdapter,
@@ -166,6 +189,22 @@ from .transcription import (
 
 __all__ = [
     "ALLOWED_ENGINES",
+    "CanonicalArtifactVerificationError",
+    "CanonicalSubmissionBridgeError",
+    "ExplicitAccommodationRequiredError",
+    "HANDLER_LATEX_PROJECT",
+    "HANDLER_LEGACY_LATEX",
+    "HANDLER_NONE",
+    "HANDLER_PDF_ACCOMMODATION",
+    "HANDLER_PROGRAMMING",
+    "ROUTE_LATEX_PROJECT",
+    "ROUTE_LATEX_SINGLE_SOURCE",
+    "ROUTE_MIXED",
+    "ROUTE_PROGRAMMING_PYTHON",
+    "ROUTE_UNSUPPORTED",
+    "ROUTE_WRITTEN_PDF",
+    "RouteDecision",
+    "SubmissionHandlerUnavailableError",
     "DUPLICATE_STATUS_EXACT_ACTIVE",
     "DUPLICATE_STATUS_EXACT_HISTORICAL",
     "DUPLICATE_STATUS_EXISTING_NEW_ATTEMPT",
@@ -266,8 +305,11 @@ __all__ = [
     "normalize_student_id",
     "parse_pdf_accommodation",
     "parse_pdf_accommodations",
+    "parse_canonical_submission",
     "parse_submission",
+    "parse_submission_record",
     "parse_submissions_folder",
+    "route_submission",
     "persist_submission_evidence",
     "prepare_reference_solution",
     "record_from_latex_file",
