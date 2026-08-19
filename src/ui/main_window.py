@@ -998,6 +998,13 @@ class RubricGrader(QMainWindow):
 
     def _sync_submission_context(self, assessment_data=None, *, load_persisted=True):
         """Synchronize controller state with the active rubric/student/question."""
+        rubric = self.rubric_data or {}
+        assessment_id = (
+            rubric.get("assessment_id")
+            or rubric.get("assignment_id")
+            or None
+        )
+        self.submission_controller.set_assessment_id(assessment_id)
         self.submission_controller.set_question_ids(self._submission_question_ids())
         self.submission_controller.set_current_question(self.current_question_id)
         if self.assessments_dir:
