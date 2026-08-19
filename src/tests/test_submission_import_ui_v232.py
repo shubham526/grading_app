@@ -28,6 +28,18 @@ class TestSubmissionImportDialogV232(unittest.TestCase):
         self.assertIn('Import Exact Duplicate?', _SOURCE)
         self.assertIn('force_duplicate_ids', _SOURCE)
 
+    def test_checkbox_changes_refresh_selected_count_and_import_button(self):
+        self.assertIn(
+            'self.table.itemChanged.connect(self._selection_changed)',
+            _SOURCE,
+        )
+        self.assertIn(
+            'def _selection_changed(self, item: QTableWidgetItem)',
+            _SOURCE,
+        )
+        self.assertIn('if item is None or item.column() != 0:', _SOURCE)
+        self.assertIn('self._update_summary()', _SOURCE)
+
     def test_slow_work_uses_import_worker(self):
         self.assertIn('SubmissionImportWorker(', _SOURCE)
         self.assertIn('self.thread_pool.start(worker)', _SOURCE)

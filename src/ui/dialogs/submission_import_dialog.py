@@ -136,6 +136,10 @@ class SubmissionImportDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # QTableWidgetItem check-state changes do not automatically refresh the
+        # dialog's derived selection count/button state.  Listen explicitly so
+        # a user can opt into importing an exact duplicate after preview.
+        self.table.itemChanged.connect(self._selection_changed)
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -339,6 +343,14 @@ class SubmissionImportDialog(QDialog):
             QMessageBox.critical(self, "Student Mapping Error", str(exc))
             return
         self._populate_table()
+
+    def _selection_changed(self, item: QTableWidgetItem) -> None:
+        """Refresh selection-dependent UI after an Import checkbox toggle."""
+        if self._rebuilding or self._workers:
+            return
+        if item is None or item.column() != 0:
+            return
+        self._update_summary()
 
     def _selected_candidates(self) -> List[ImportCandidate]:
         selected: List[ImportCandidate] = []
