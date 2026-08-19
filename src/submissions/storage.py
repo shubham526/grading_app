@@ -20,14 +20,18 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
-import shutil
-import tempfile
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
+from .file_store import (
+    atomic_write_json as _atomic_write_json,
+    atomic_write_text as _atomic_write_text,
+    compute_file_sha256,
+    copy_regular_file,
+    reject_symlink as _reject_symlink,
+    sha256_json as _sha256_json,
+)
 from .matcher import normalize_student_id
 from .models import ParsedSubmission, SUBMISSION_MODE_PDF_ACCOMMODATION
 from .transcription import TranscriptionBackend, TranscriptionBatchResult
@@ -77,22 +81,10 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _canonical_json_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
 
 
-def _sha256_json(value: Any) -> str:
-    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
-def _reject_symlink(path: Path, label: str) -> None:
-    if path.exists() and path.is_symlink():
-        raise ValueError(f"Symlinked {label} is not accepted: {path}")
 
 
 def evidence_storage_paths(
@@ -146,91 +138,19 @@ def evidence_storage_paths(
     )
 
 
-def compute_file_sha256(path: str, *, chunk_size: int = 1024 * 1024) -> str:
-    """Compute SHA-256 for a regular non-symlink file."""
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive")
-    requested = Path(path).expanduser()
-    if requested.is_symlink():
-        raise ValueError(f"Symlinked files are not hashed as evidence: {requested}")
-    source = requested.resolve()
-    if not source.exists() or not source.is_file():
-        raise FileNotFoundError(str(source))
-
-    digest = hashlib.sha256()
-    with source.open("rb") as handle:
-        while True:
-            block = handle.read(chunk_size)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _reject_symlink(path.parent, "evidence output directory")
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(str(temp_path), str(path))
-    finally:
-        if temp_path.exists():
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass
 
 
-def _atomic_write_json(path: Path, value: Any) -> None:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    ).encode("utf-8") + b"\n"
-    _atomic_write_bytes(path, payload)
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    _atomic_write_bytes(path, str(text).encode("utf-8"))
+
+
 
 
 def _copy_file(source_path: str, target: Path) -> str:
-    requested = Path(source_path).expanduser()
-    if requested.is_symlink():
-        raise ValueError(f"Symlinked evidence files are not accepted: {requested}")
-    source = requested.resolve()
-    if not source.exists() or not source.is_file():
-        raise FileNotFoundError(str(source))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _reject_symlink(target.parent, "evidence output directory")
-
-    # Avoid copying a file onto itself when the parser already rendered directly
-    # into the persistent evidence directory.
-    try:
-        if source == target.resolve():
-            return str(target.resolve())
-    except FileNotFoundError:
-        pass
-
-    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
-    os.close(fd)
-    temp_path = Path(temp_name)
-    try:
-        shutil.copy2(str(source), str(temp_path))
-        os.replace(str(temp_path), str(target))
-    finally:
-        if temp_path.exists():
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass
-    return str(target.resolve())
+    """Preserve the legacy v2.2 evidence-store overwrite behavior."""
+    return copy_regular_file(source_path, target, overwrite=True)
 
 
 def _relative_to_student(path: str, student_dir: Path) -> str:
