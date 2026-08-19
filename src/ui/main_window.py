@@ -23,6 +23,8 @@ from src.ui.dialogs.abet_dialogs import (
 )
 from src.ui.dialogs.master_evidence_export_dialog import MasterEvidenceExportDialog
 from src.ui.dialogs.similarity_dialog import SimilarityReviewDialog
+from src.ui.dialogs.submission_history_dialog import SubmissionHistoryDialog
+from src.ui.dialogs.submission_import_dialog import SubmissionImportDialog
 
 from PyQt5.QtWidgets import (
     QAction, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -57,7 +59,7 @@ from src.core.roster import (
     safe_student_filename,
 )
 from src.core.rubric import load_rubric_from_file
-from src.submissions import load_reference_solution
+from src.submissions import SubmissionRepository, load_reference_solution
 
 from src.ui.widgets.header import HeaderWidget
 from src.ui.widgets.status_bar import StatusBarWidget
@@ -254,9 +256,19 @@ class RubricGrader(QMainWindow):
         self.load_btn.clicked.connect(self.load_rubric)
         toolbar_layout.addWidget(self.load_btn)
 
+        self.import_submissions_btn = QPushButton("Import Submissions")
+        self.import_submissions_btn.setIcon(qta.icon('fa5s.file-upload'))
+        self.import_submissions_btn.setToolTip(
+            "Import local submission files into canonical attempt/provenance storage"
+        )
+        self.import_submissions_btn.clicked.connect(self.show_submission_import_dialog)
+        toolbar_layout.addWidget(self.import_submissions_btn)
+
+        # Keep the proven v2.2 LaTeX-folder path available during the v2.3.2
+        # transition. The new canonical importer above is the preferred path.
         self.load_submissions_btn = QPushButton("Load Submissions")
         self.load_submissions_btn.setIcon(qta.icon('fa5s.file-code'))
-        self.load_submissions_btn.setToolTip("Load normal LaTeX submissions for this assignment")
+        self.load_submissions_btn.setToolTip("Load normal LaTeX submissions using the legacy v2.2 folder workflow")
         self.load_submissions_btn.clicked.connect(self.load_submissions_folder)
         toolbar_layout.addWidget(self.load_submissions_btn)
 
@@ -341,6 +353,15 @@ class RubricGrader(QMainWindow):
         )
         self.similarity_review_action.triggered.connect(self.show_similarity_review)
         tools_menu.addAction(self.similarity_review_action)
+
+        self.submission_history_action = QAction(
+            qta.icon('fa5s.history'), "Submission History", self
+        )
+        self.submission_history_action.setToolTip(
+            "View immutable canonical attempts for the current student and switch the active attempt"
+        )
+        self.submission_history_action.triggered.connect(self.show_submission_history)
+        tools_menu.addAction(self.submission_history_action)
 
         self.tools_menu_button = QToolButton()
         self.tools_menu_button.setText("Tools")
@@ -1147,6 +1168,175 @@ class RubricGrader(QMainWindow):
     # ------------------------------------------------------------------
     # v2.2 submission actions / background worker wiring
     # ------------------------------------------------------------------
+
+    def _canonical_assessment_id(self):
+        """Return the stable rubric assessment identity used by canonical storage."""
+        rubric = self.rubric_data or {}
+        value = rubric.get("assessment_id") or rubric.get("assignment_id") or ""
+        return str(value).strip() or None
+
+    def _ensure_canonical_submission_repository(self):
+        """Return a canonical repository rooted in the current assessment workspace."""
+        if not self._ensure_assessments_dir(allow_prompt=True):
+            return None
+        self._configure_submission_evidence_root()
+        evidence_root = self.submission_controller.evidence_root
+        if not evidence_root:
+            return None
+        repository = self.submission_controller.submission_repository
+        if repository is None:
+            repository = SubmissionRepository(evidence_root, create=True)
+            self.submission_controller.set_submission_repository(repository)
+        return repository
+
+    def show_submission_import_dialog(self):
+        """Open the canonical local-submission import preview/commit workflow."""
+        if not self.rubric_data:
+            QMessageBox.warning(self, "No Rubric", "Load the assignment rubric before importing submissions.")
+            return
+
+        assessment_id = self._canonical_assessment_id()
+        if not assessment_id:
+            QMessageBox.warning(
+                self,
+                "Missing Assessment ID",
+                "The loaded rubric needs a stable assessment_id before canonical submissions can be imported.",
+            )
+            return
+
+        if not self.student_records:
+            self._ensure_manual_student_record()
+        roster = self.student_records or self.roster_records
+        if not roster:
+            QMessageBox.warning(
+                self,
+                "No Roster",
+                "Load a roster (or establish a current student) before importing submissions so files can be mapped safely.",
+            )
+            return
+
+        repository = self._ensure_canonical_submission_repository()
+        if repository is None:
+            return
+
+        self.submission_controller.set_assessment_id(assessment_id)
+        dialog = SubmissionImportDialog(
+            repository,
+            assessment_id,
+            roster,
+            question_ids=self._submission_question_ids(),
+            evidence_dir=self.submission_controller.evidence_root,
+            thread_pool=self.submission_thread_pool,
+            parent=self,
+        )
+        dialog.imports_committed.connect(self._on_canonical_imports_committed)
+        dialog.exec_()
+
+    def _on_canonical_imports_committed(self, payload):
+        """Register completed canonical imports and parsed evidence on the UI thread."""
+        if not isinstance(payload, dict):
+            return
+        result = payload.get("commit_result")
+        submissions = list(getattr(result, "submissions", []) or [])
+        if not submissions:
+            return
+
+        repository = self.submission_controller.submission_repository
+        assessment_id = self._canonical_assessment_id()
+        if repository is None or not assessment_id:
+            return
+
+        parsed_by_student = dict(payload.get("parsed_by_student", {}) or {})
+        affected_students = sorted({submission.student_id for submission in submissions})
+        for student_id in affected_students:
+            active = repository.get_active_submission(assessment_id, student_id)
+            if active is None:
+                continue
+            # Reassert the repository's final active pointer in controller state.
+            # This also drops any ParsedSubmission cache linked to an older attempt.
+            self.submission_controller.set_active_canonical_submission(
+                student_id,
+                active.submission_id,
+                assessment_id=assessment_id,
+            )
+            parsed = parsed_by_student.get(student_id)
+            if parsed is not None:
+                self.submission_controller.register_canonical_submission(
+                    active,
+                    parsed=parsed,
+                    replace=True,
+                )
+
+        active_student = self._active_submission_student_id()
+        if active_student:
+            try:
+                canonical = self.submission_controller.canonical_student_id(active_student)
+            except ValueError:
+                canonical = None
+            if canonical and canonical in parsed_by_student:
+                self.submission_controller.activate_student(canonical, load_persisted=False)
+                self.current_submission = parsed_by_student[canonical]
+                self._notify_submission_context_changed()
+            else:
+                # Do not synchronously invoke a not-yet-installed programming/ZIP
+                # handler merely to refresh the status bar. The repository state
+                # is already committed and will be loaded when its handler exists.
+                self._update_submission_status()
+
+        imported_count = int(getattr(getattr(result, "batch", None), "imported_count", 0) or 0)
+        pending = payload.get("handler_pending", {}) or {}
+        parse_errors = payload.get("parse_errors", {}) or {}
+        message = f"Imported {imported_count} canonical submission(s)"
+        if pending:
+            message += f" · {len(pending)} awaiting a later/explicit handler"
+        if parse_errors:
+            message += f" · {len(parse_errors)} evidence preparation warning(s)"
+        self.status_bar.show_temporary_message(message)
+
+    def show_submission_history(self):
+        """Show immutable canonical attempts for the current student."""
+        if not self.rubric_data:
+            QMessageBox.warning(self, "No Rubric", "Load the assignment rubric first.")
+            return
+        assessment_id = self._canonical_assessment_id()
+        if not assessment_id:
+            QMessageBox.warning(self, "Missing Assessment ID", "The loaded rubric has no stable assessment_id.")
+            return
+        if not self._ensure_assessments_dir(allow_prompt=False):
+            QMessageBox.information(
+                self,
+                "No Assessment Workspace",
+                "Choose a Grades + Evidence Folder before viewing canonical submission history.",
+            )
+            return
+        self._configure_submission_evidence_root()
+        student_id = self._active_submission_student_id()
+        if not student_id:
+            QMessageBox.information(self, "No Student", "Select a student before viewing submission history.")
+            return
+
+        # Instantiate the lazy repository only when the history UI is requested.
+        evidence_root = self.submission_controller.evidence_root
+        if evidence_root and self.submission_controller.submission_repository is None:
+            self.submission_controller.set_submission_repository(
+                SubmissionRepository(evidence_root, create=False)
+            )
+        self.submission_controller.set_assessment_id(assessment_id)
+
+        dialog = SubmissionHistoryDialog(
+            self.submission_controller,
+            student_id,
+            assessment_id,
+            parent=self,
+        )
+        dialog.submission_activated.connect(self._on_submission_history_activated)
+        dialog.exec_()
+
+    def _on_submission_history_activated(self, parsed_submission):
+        """Refresh the visible workspace after a history dialog activates an attempt."""
+        self.current_submission = parsed_submission
+        self._notify_submission_context_changed()
+        self.status_bar.show_temporary_message("Active submission attempt changed")
 
     def load_submissions_folder(self):
         """Load and persist normal LaTeX submissions in a background worker."""

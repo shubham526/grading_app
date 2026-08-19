@@ -1,11 +1,11 @@
-"""Background workers for submission ingestion and transcription.
+"""Background workers for submission ingestion, import, and transcription."""
 
-Commit 5 keeps slow submission work off the Qt GUI thread.  The public worker
-API is intentionally small: callers create a :class:`SubmissionWorker`, submit
-it to a ``QThreadPool``, and register returned parsed submissions on the UI
-thread through ``SubmissionController``.
-"""
-
+from .submission_import_worker import (
+    SubmissionImportOperation,
+    SubmissionImportWorker,
+    SubmissionImportWorkerSignals,
+    new_import_request_id,
+)
 from .submission_worker import (
     SubmissionOperation,
     SubmissionWorker,
@@ -14,8 +14,12 @@ from .submission_worker import (
 )
 
 __all__ = [
+    "SubmissionImportOperation",
+    "SubmissionImportWorker",
+    "SubmissionImportWorkerSignals",
     "SubmissionOperation",
     "SubmissionWorker",
     "SubmissionWorkerSignals",
+    "new_import_request_id",
     "new_request_id",
 ]
