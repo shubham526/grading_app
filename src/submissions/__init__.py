@@ -10,12 +10,40 @@ v2.2.0 commits 1-4 provide four intentionally separated backend layers:
 * persistent evidence/provenance storage with SHA-256 validation and reusable
   transcription caches.
 
+v2.3.2 adds a source-agnostic canonical submission-domain layer underneath
+those existing parsing/evidence APIs. The new ``Submission`` and
+``ArtifactFile`` objects describe immutable submission identity/provenance;
+``ParsedSubmission`` remains the grading-facing representation of extracted
+content.
+
 This package intentionally has no PyQt dependency so its backend can be tested
 and reused independently of the desktop UI.
 """
 
-from .compiler import ALLOWED_ENGINES, cleanup_compilation_artifacts, compile_tex_to_pdf
-from .latex import extract_text_from_tex, strip_latex_comment
+from .compiler import (
+    ALLOWED_ENGINES,
+    cleanup_compilation_artifacts,
+    compile_tex_to_pdf,
+)
+from .domain import (
+    SUBMISSION_DOMAIN_SCHEMA_VERSION,
+    ArtifactFile,
+    CandidateFile,
+    DerivedArtifact,
+    ExternalReference,
+    ImportBatch,
+    ImportCandidate,
+    Submission,
+    generate_artifact_id,
+    generate_candidate_id,
+    generate_derived_artifact_id,
+    generate_import_batch_id,
+    generate_submission_id,
+)
+from .latex import (
+    extract_text_from_tex,
+    strip_latex_comment,
+)
 from .matcher import (
     discover_submissions,
     match_student_directory,
@@ -53,7 +81,11 @@ from .pdf import (
     record_from_pdf_accommodation,
     render_pdf_pages,
 )
-from .splitter import FULL_SUBMISSION, normalize_heading_question_id, split_answers_by_question
+from .splitter import (
+    FULL_SUBMISSION,
+    normalize_heading_question_id,
+    split_answers_by_question,
+)
 from .reference_solution import (
     REFERENCE_SOLUTION_DIRNAME,
     ReferenceSolution,
@@ -103,8 +135,11 @@ from .transcription import (
     transcribe_page_images,
 )
 
+
 __all__ = [
     "ALLOWED_ENGINES",
+    "ArtifactFile",
+    "CandidateFile",
     "CompilationResult",
     "DEFAULT_HANDWRITING_MODEL",
     "DEFAULT_KEEP_ALIVE",
@@ -120,31 +155,39 @@ __all__ = [
     "DEFAULT_RENDER_DPI",
     "DEFAULT_SEED",
     "DEFAULT_TEMPERATURE",
+    "DerivedArtifact",
     "EVIDENCE_SCHEMA_VERSION",
     "EXTRACTED_ANSWERS_FILENAME",
     "EvidenceStoragePaths",
+    "ExternalReference",
     "FULL_SUBMISSION",
     "HANDWRITING_PROMPT_SHA256",
     "HANDWRITING_PROMPT_VERSION",
     "HANDWRITING_TRANSCRIPTION_PROMPT",
+    "ImportBatch",
+    "ImportCandidate",
     "MAX_RENDER_DPI",
     "MIN_RENDER_DPI",
-    "RAW_TEXT_FILENAME",
-    "SUBMISSION_META_FILENAME",
-    "TRANSCRIPTION_CACHE_FILENAME",
-    "TRANSCRIPTION_CACHE_SCHEMA_VERSION",
-    "TRANSCRIPTION_FILENAME",
     "OllamaTranscriptionBackend",
     "PageTranscription",
     "ParsedSubmission",
     "PdfPageArtifact",
     "PdfRenderResult",
+    "RAW_TEXT_FILENAME",
+    "REFERENCE_SOLUTION_DIRNAME",
+    "ReferenceSolution",
     "SOURCE_LATEX",
     "SOURCE_NONE",
     "SOURCE_PDF",
+    "SUBMISSION_DOMAIN_SCHEMA_VERSION",
+    "SUBMISSION_META_FILENAME",
     "SUBMISSION_MODE_LATEX",
     "SUBMISSION_MODE_PDF_ACCOMMODATION",
+    "Submission",
     "SubmissionRecord",
+    "TRANSCRIPTION_CACHE_FILENAME",
+    "TRANSCRIPTION_CACHE_SCHEMA_VERSION",
+    "TRANSCRIPTION_FILENAME",
     "TranscriptionBackend",
     "TranscriptionBatchResult",
     "TranscriptionPreflightResult",
@@ -160,8 +203,14 @@ __all__ = [
     "evidence_storage_paths",
     "extract_text_from_pdf",
     "extract_text_from_tex",
+    "generate_artifact_id",
+    "generate_candidate_id",
+    "generate_derived_artifact_id",
+    "generate_import_batch_id",
+    "generate_submission_id",
     "load_cached_transcription",
     "load_persisted_submission",
+    "load_reference_solution",
     "match_student_directory",
     "normalize_heading_question_id",
     "normalize_student_id",
@@ -170,17 +219,14 @@ __all__ = [
     "parse_submission",
     "parse_submissions_folder",
     "persist_submission_evidence",
+    "prepare_reference_solution",
     "record_from_latex_file",
     "record_from_pdf_accommodation",
+    "reference_solution_root",
     "render_pdf_pages",
     "save_transcription_cache",
     "split_answers_by_question",
     "strip_latex_comment",
     "transcribe_page_images",
     "transcription_cache_key",
-    "REFERENCE_SOLUTION_DIRNAME",
-    "ReferenceSolution",
-    "load_reference_solution",
-    "prepare_reference_solution",
-    "reference_solution_root",
 ]
