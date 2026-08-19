@@ -73,6 +73,21 @@ class TestCommit6ControllerConfiguration(unittest.TestCase):
             self.assertEqual(controller.assessment_id, "PS1")
             self.assertFalse(root.exists())
 
+
+    def test_changing_assessment_clears_student_parsed_cache(self):
+        controller = SubmissionController()
+        controller.set_assessment_id("PS1")
+        controller.register_submission(_parsed("alice", "PS1 answer"))
+        controller.activate_student("alice", load_persisted=False)
+        self.assertIsNotNone(controller.current_submission)
+
+        controller.set_assessment_id("PS2")
+
+        self.assertIsNone(controller.current_submission)
+        self.assertIsNone(
+            controller.submission_for_student("alice", load_persisted=False)
+        )
+
     def test_clear_without_configuration_removes_canonical_context(self):
         with tempfile.TemporaryDirectory() as tmp:
             controller = SubmissionController(
@@ -313,6 +328,51 @@ class TestCommit6LegacyMigrationOnLoad(unittest.TestCase):
                 len(restarted.submission_history_for_student("alice")),
                 1,
             )
+
+
+    def test_switching_assessment_does_not_migrate_or_display_linked_legacy_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "evidence"
+            tex = root / "alice_PS1.tex"
+            tex.write_text("Question 1\nPS1 answer", encoding="utf-8")
+
+            repository = SubmissionRepository(str(evidence))
+            ps1 = repository.create_submission(
+                assessment_id="PS1",
+                student_id="alice",
+                source_system=SOURCE_SYSTEM_LOCAL_UPLOAD,
+                files=[_candidate(tex)],
+            )
+            # Canonical parsing persists the v2.2 compatibility bundle plus an
+            # explicit PS1 canonical linkage in the student-only evidence path.
+            from src.submissions import parse_canonical_submission
+            parse_canonical_submission(
+                ps1,
+                repository,
+                ["Q1"],
+                compile_pdf=False,
+                evidence_dir=str(evidence),
+            )
+
+            controller = SubmissionController(
+                evidence_root=str(evidence),
+                question_ids=["Q1"],
+            )
+            controller.set_assessment_id("PS1")
+            loaded_ps1 = controller.activate_student("alice", load_persisted=True)
+            self.assertIsNotNone(loaded_ps1)
+            self.assertEqual(
+                loaded_ps1.metadata["canonical_submission"]["assessment_id"],
+                "PS1",
+            )
+
+            controller.set_assessment_id("PS2")
+            loaded_ps2 = controller.activate_student("alice", load_persisted=True)
+
+            self.assertIsNone(loaded_ps2)
+            self.assertIsNone(controller.current_submission)
+            self.assertEqual(repository.list_submissions("PS2", "alice"), [])
 
     def test_unsupported_future_artifact_is_valid_canonical_state_but_not_parsed(self):
         with tempfile.TemporaryDirectory() as tmp:

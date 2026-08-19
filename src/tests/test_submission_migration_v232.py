@@ -11,6 +11,7 @@ from src.submissions import (
     MIGRATION_STATUS_CANONICAL_ALREADY_PRESENT,
     MIGRATION_STATUS_CREATED,
     MIGRATION_STATUS_EXISTING,
+    LegacyEvidenceAssessmentMismatchError,
     LegacyEvidenceVerificationError,
     SubmissionRepository,
     assessment_submission_fields,
@@ -301,6 +302,83 @@ class TestLegacySubmissionMigration(unittest.TestCase):
                 ensured.submission.submission_id,
                 canonical.submission_id,
             )
+
+
+    def test_linked_legacy_evidence_cannot_migrate_into_another_assessment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "evidence"
+            source = root / "alice.tex"
+            source.write_text("Question 1\nPS1 answer\n", encoding="utf-8")
+
+            repository = SubmissionRepository(str(evidence))
+            ps1 = repository.create_submission(
+                assessment_id="PS1",
+                student_id="alice",
+                source_system=SOURCE_SYSTEM_LOCAL_UPLOAD,
+                files=[
+                    CandidateFile(
+                        source_path=str(source),
+                        original_filename="alice_PS1.tex",
+                        artifact_type=ARTIFACT_TYPE_TEX,
+                    )
+                ],
+            )
+            parse_canonical_submission(
+                ps1,
+                repository,
+                ["Q1"],
+                compile_pdf=False,
+                evidence_dir=str(evidence),
+            )
+
+            with self.assertRaises(LegacyEvidenceAssessmentMismatchError):
+                migrate_legacy_submission(
+                    str(evidence),
+                    "PS2",
+                    "alice",
+                    repository=repository,
+                )
+
+            self.assertEqual(repository.list_submissions("PS2", "alice"), [])
+
+    def test_ensure_ignores_legacy_evidence_linked_to_another_assessment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "evidence"
+            source = root / "alice.tex"
+            source.write_text("Question 1\nPS1 answer\n", encoding="utf-8")
+
+            repository = SubmissionRepository(str(evidence))
+            ps1 = repository.create_submission(
+                assessment_id="PS1",
+                student_id="alice",
+                source_system=SOURCE_SYSTEM_LOCAL_UPLOAD,
+                files=[
+                    CandidateFile(
+                        source_path=str(source),
+                        original_filename="alice_PS1.tex",
+                        artifact_type=ARTIFACT_TYPE_TEX,
+                    )
+                ],
+            )
+            parse_canonical_submission(
+                ps1,
+                repository,
+                ["Q1"],
+                compile_pdf=False,
+                evidence_dir=str(evidence),
+            )
+
+            ensured = ensure_canonical_submission(
+                str(evidence),
+                "PS2",
+                "alice",
+                repository=repository,
+            )
+
+            self.assertIsNone(ensured)
+            self.assertEqual(repository.list_submissions("PS2", "alice"), [])
 
     def test_canonical_bridge_link_survives_legacy_reload_and_assessment_fields(self):
         with tempfile.TemporaryDirectory() as tmp:

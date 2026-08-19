@@ -52,6 +52,10 @@ class LegacyEvidenceVerificationError(LegacySubmissionMigrationError):
     """Raised when legacy evidence fails its existing SHA-256 verification."""
 
 
+class LegacyEvidenceAssessmentMismatchError(LegacySubmissionMigrationError):
+    """Raised when legacy evidence is already linked to another assessment."""
+
+
 class LegacyEvidenceUnsupportedError(LegacySubmissionMigrationError):
     """Raised when a legacy evidence bundle has no migratable original files."""
 
@@ -96,6 +100,57 @@ def _original_basename(value: object, fallback: str) -> str:
     raw = raw.replace("\\", "/")
     name = raw.rsplit("/", 1)[-1].strip() if raw else ""
     return name or fallback
+
+
+def _linked_assessment_ids(manifest: Mapping[str, Any]) -> List[str]:
+    """Return assessment IDs explicitly linked from a legacy evidence manifest.
+
+    v2.2 evidence directories are student-scoped rather than assessment-scoped.
+    Once v2.3.2 has linked that evidence to a canonical submission, that linkage
+    is the only safe signal identifying which assessment the legacy bundle
+    belongs to. Both the top-level compatibility copy and nested metadata copy
+    are checked defensively.
+    """
+    values: List[str] = []
+
+    top = manifest.get("canonical_submission", {})
+    if isinstance(top, Mapping):
+        value = str(top.get("assessment_id") or "").strip()
+        if value:
+            values.append(value)
+
+    metadata = manifest.get("metadata", {})
+    if isinstance(metadata, Mapping):
+        nested = metadata.get("canonical_submission", {})
+        if isinstance(nested, Mapping):
+            value = str(nested.get("assessment_id") or "").strip()
+            if value:
+                values.append(value)
+
+    return list(dict.fromkeys(values))
+
+
+def _validate_linked_assessment(
+    manifest: Mapping[str, Any],
+    assessment_id: str,
+) -> None:
+    """Refuse to promote student-only legacy evidence into another assessment."""
+    linked_ids = _linked_assessment_ids(manifest)
+    if not linked_ids:
+        # Truly old v2.2 evidence has no assessment provenance. It remains
+        # eligible for the explicit/lazy first migration used by compatibility.
+        return
+    if len(linked_ids) > 1:
+        raise LegacyEvidenceAssessmentMismatchError(
+            "Legacy evidence contains conflicting canonical assessment linkage: "
+            + ", ".join(linked_ids)
+        )
+    linked = linked_ids[0]
+    if linked != assessment_id:
+        raise LegacyEvidenceAssessmentMismatchError(
+            "Legacy evidence is already linked to assessment "
+            f"{linked!r} and cannot be migrated into {assessment_id!r}."
+        )
 
 
 def _legacy_manifest(storage_root: str, student_id: str) -> Dict[str, Any]:
@@ -312,6 +367,7 @@ def migrate_legacy_submission(
             )
 
     manifest = _legacy_manifest(storage_root, student_id)
+    _validate_linked_assessment(manifest, assessment_id)
     manifest_sha = sha256_json(manifest)
 
     linked = _linked_canonical_submission(
@@ -470,15 +526,22 @@ def ensure_canonical_submission(
     if not Path(paths.meta_path).exists():
         return None
 
-    return migrate_legacy_submission(
-        storage_root,
-        assessment_id,
-        student_id,
-        repository=repository,
-        make_active=True,
-        verify_hashes=verify_hashes,
-        require_verified=require_verified,
-    )
+    try:
+        return migrate_legacy_submission(
+            storage_root,
+            assessment_id,
+            student_id,
+            repository=repository,
+            make_active=True,
+            verify_hashes=verify_hashes,
+            require_verified=require_verified,
+        )
+    except LegacyEvidenceAssessmentMismatchError:
+        # Automatic compatibility migration is optional. A legacy bundle that
+        # is explicitly linked to another assessment must be ignored here, not
+        # copied into the current assessment namespace. Direct migration callers
+        # still receive the explicit error from migrate_legacy_submission().
+        return None
 
 
 __all__ = [
@@ -486,6 +549,7 @@ __all__ = [
     "MIGRATION_STATUS_CANONICAL_ALREADY_PRESENT",
     "MIGRATION_STATUS_CREATED",
     "MIGRATION_STATUS_EXISTING",
+    "LegacyEvidenceAssessmentMismatchError",
     "LegacyEvidenceUnsupportedError",
     "LegacyEvidenceVerificationError",
     "LegacyMigrationResult",

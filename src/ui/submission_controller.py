@@ -167,6 +167,11 @@ class SubmissionController:
         normalized = value or None
         if normalized != self._assessment_id:
             self._assessment_id = normalized
+            # ParsedSubmission is assessment-specific even though the legacy
+            # v2.2 cache was keyed only by student. Never carry parsed evidence
+            # across a rubric/assessment boundary. Canonical history remains on
+            # disk and can be reparsed when the assessment is selected again.
+            self._submissions.clear()
             self._active_submission_ids.clear()
         return self._assessment_id
 
@@ -580,6 +585,16 @@ class SubmissionController:
         self._current_student_id = canonical
         return parsed
 
+    def _parsed_matches_assessment(self, parsed: ParsedSubmission) -> bool:
+        """Return False when parsed evidence is linked to another assessment."""
+        if not self._assessment_id:
+            return True
+        metadata = parsed.metadata.get("canonical_submission", {})
+        if not isinstance(metadata, Mapping):
+            return True
+        linked_assessment = str(metadata.get("assessment_id") or "").strip()
+        return not linked_assessment or linked_assessment == self._assessment_id
+
     def submission_for_student(
         self,
         student_id: Any,
@@ -602,6 +617,12 @@ class SubmissionController:
                 verify_hashes=verify_hashes,
             )
         except FileNotFoundError:
+            parsed = None
+
+        if parsed is not None and not self._parsed_matches_assessment(parsed):
+            # v2.2 evidence lives in a student-only directory. If that bundle
+            # has already been linked to another canonical assessment, it must
+            # not be displayed or lazily migrated in the current assessment.
             parsed = None
 
         active: Optional[Submission] = None
