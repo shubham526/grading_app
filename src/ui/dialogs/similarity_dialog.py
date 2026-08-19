@@ -26,6 +26,8 @@ from PyQt5.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -499,10 +501,14 @@ class SimilarityReviewDialog(QDialog):
         root.addWidget(disclaimer)
 
         self.main_splitter = QSplitter(Qt.Vertical)
+        self.main_splitter.setObjectName("similarityMainSplitter")
         self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(10)
+        self.main_splitter.setOpaqueResize(True)
         root.addWidget(self.main_splitter, 1)
 
         config_widget = QWidget()
+        config_widget.setObjectName("similarityConfigWidget")
         config_outer = QVBoxLayout(config_widget)
         config_outer.setContentsMargins(0, 0, 0, 0)
         config_outer.setSpacing(10)
@@ -727,9 +733,28 @@ class SimilarityReviewDialog(QDialog):
         self.trends_check.toggled.connect(self._update_advanced_controls)
 
         config_outer.addLayout(advanced_row)
-        self.main_splitter.addWidget(config_widget)
+
+        # The configuration form is intentionally taller than many laptop
+        # viewports once every advanced option is visible.  Put it in its own
+        # scroll area so its size hint cannot pin the splitter and squeeze the
+        # results table down to a few pixels.
+        self.config_scroll = QScrollArea()
+        self.config_scroll.setObjectName("similarityConfigScroll")
+        self.config_scroll.setWidgetResizable(True)
+        self.config_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.config_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.config_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.config_scroll.setMinimumHeight(180)
+        self.config_scroll.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
+        self.config_scroll.setWidget(config_widget)
+        self.main_splitter.addWidget(self.config_scroll)
 
         result_widget = QWidget()
+        result_widget.setObjectName("similarityResultsWidget")
+        result_widget.setMinimumHeight(220)
+        result_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         result_layout = QVBoxLayout(result_widget)
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(6)
@@ -742,6 +767,8 @@ class SimilarityReviewDialog(QDialog):
 
         self.result_tabs = QTabWidget()
         self.result_tabs.setObjectName("similarityResultTabs")
+        self.result_tabs.setMinimumHeight(170)
+        self.result_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         pairs_tab = QWidget()
         pairs_layout = QVBoxLayout(pairs_tab)
@@ -806,7 +833,11 @@ class SimilarityReviewDialog(QDialog):
         result_layout.addWidget(self.result_tabs, 1)
 
         self.main_splitter.addWidget(result_widget)
-        self.main_splitter.setSizes([390, 500])
+        self.main_splitter.setStretchFactor(0, 2)
+        self.main_splitter.setStretchFactor(1, 3)
+        # Prefer the review results over the settings form on first open.  The
+        # settings remain fully reachable by scrolling or dragging the divider.
+        self.main_splitter.setSizes([310, 520])
 
         actions = QHBoxLayout()
         self.run_btn = QPushButton("Run Similarity Review")

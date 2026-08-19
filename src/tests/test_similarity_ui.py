@@ -73,6 +73,21 @@ class TestSimilarityUiWiringWithoutQt(unittest.TestCase):
         self.assertIn('self.result_tabs.addTab(trends_tab, "Trends")', source)
         self.assertIn("SimilarityClusterDetailDialog", source)
 
+    def test_similarity_settings_are_scrollable_and_results_have_reserved_space(self):
+        source = DIALOG.read_text(encoding="utf-8")
+        self.assertIn('self.main_splitter.setObjectName("similarityMainSplitter")', source)
+        self.assertIn("self.main_splitter.setHandleWidth(10)", source)
+        self.assertIn("self.config_scroll = QScrollArea()", source)
+        self.assertIn('self.config_scroll.setObjectName("similarityConfigScroll")', source)
+        self.assertIn("self.config_scroll.setWidgetResizable(True)", source)
+        self.assertIn("self.config_scroll.setMinimumHeight(180)", source)
+        self.assertIn('result_widget.setObjectName("similarityResultsWidget")', source)
+        self.assertIn("result_widget.setMinimumHeight(220)", source)
+        self.assertIn("self.result_tabs.setMinimumHeight(170)", source)
+        self.assertIn("self.main_splitter.setStretchFactor(0, 2)", source)
+        self.assertIn("self.main_splitter.setStretchFactor(1, 3)", source)
+        self.assertIn("self.main_splitter.setSizes([310, 520])", source)
+
     def test_pair_detail_displays_advanced_signals_and_provenance(self):
         source = PAIR_DIALOG.read_text(encoding="utf-8")
         self.assertIn("Embedding similarity", source)
@@ -146,6 +161,28 @@ class TestSimilarityReviewDialog(unittest.TestCase):
         dialog.embedding_check.setEnabled(True)
         dialog.embedding_status_label.setText("Test embedding provider available.")
         return dialog
+
+    def test_main_similarity_splitter_keeps_results_visible_and_resizable(self):
+        dialog = self._dialog()
+        dialog.show()
+        self.app.processEvents()
+
+        splitter = dialog.findChild(QSplitter, "similarityMainSplitter")
+        self.assertIsNotNone(splitter)
+        self.assertEqual(splitter.orientation(), Qt.Vertical)
+        self.assertEqual(splitter.count(), 2)
+        self.assertEqual(splitter.handleWidth(), 10)
+        self.assertGreaterEqual(dialog.config_scroll.minimumHeight(), 180)
+        self.assertGreaterEqual(dialog.result_tabs.minimumHeight(), 170)
+
+        # The settings pane must be able to shrink without crushing the results.
+        splitter.setSizes([180, 500])
+        self.app.processEvents()
+        sizes = splitter.sizes()
+        self.assertEqual(len(sizes), 2)
+        self.assertGreaterEqual(sizes[1], 220)
+
+        dialog.close()
 
     @staticmethod
     def _write_assessment(path, student_id, q1, q2):
