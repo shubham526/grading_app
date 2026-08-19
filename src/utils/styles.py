@@ -298,6 +298,45 @@ QToolButton:disabled {
     color: #B2B8C2;
 }
 
+
+QToolButton[toolbarMenu="true"] {
+    min-height: 28px;
+    padding: 5px 10px;
+    border: 1px solid #D0D5DD;
+    border-radius: 6px;
+    background-color: #FFFFFF;
+    color: #344054;
+    font-weight: 500;
+}
+QToolButton[toolbarMenu="true"]:hover {
+    background-color: #F9FAFB;
+    border-color: #B8C0CC;
+}
+QToolButton[toolbarMenu="true"]:pressed,
+QToolButton[toolbarMenu="true"]:checked {
+    background-color: #F2F4F7;
+}
+
+QFrame#assessmentContextStrip {
+    background-color: #FFFFFF;
+    border: 1px solid #E1E5EB;
+    border-radius: 8px;
+}
+QLabel#contextCaption {
+    color: #667085;
+    font-size: 11px;
+    font-weight: 600;
+}
+QLabel#contextMeta,
+QLabel#workspacePathLabel,
+QLabel#gradingSummaryLabel {
+    color: #667085;
+    font-size: 11px;
+}
+QLabel#workspacePathLabel {
+    font-weight: 500;
+}
+
 QSplitter::handle {
     background-color: #E6E9EF;
 }

@@ -43,37 +43,24 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
         self.assertIn("Assessment workspace ready", source)
         self.assertIn("load a roster or submissions to begin", source)
 
-    def test_question_mode_controls_use_two_compact_rows(self):
+    def test_question_and_student_controls_are_compact_and_workflow_aware(self):
         source = _segment("init_ui")
         self.assertIn("question_row = QHBoxLayout()", source)
-        self.assertIn("student_row = QHBoxLayout()", source)
-        self.assertIn("question_mode_layout.addLayout(question_row)", source)
-        self.assertIn("question_mode_layout.addLayout(student_row)", source)
-        self.assertNotIn("question_mode_layout.addLayout(action_row)", source)
-
-    def test_question_mode_actions_share_student_row(self):
-        source = _segment("init_ui")
-        self.assertIn("student_row.addWidget(self.save_question_btn)", source)
-        self.assertIn("student_row.addWidget(self.save_next_student_btn)", source)
-        self.assertIn("student_row.addWidget(self.mark_question_complete_btn)", source)
+        self.assertIn("student_row = QHBoxLayout(self.student_navigation_controls)", source)
+        self.assertIn("question_actions_layout.addWidget(self.save_question_btn)", source)
+        self.assertIn("student_actions_layout.addWidget(self.save_next_assessment_btn)", source)
         self.assertIn('QPushButton("Save + Next")', source)
-        self.assertIn('QPushButton("Mark Complete")', source)
+        self.assertIn('QPushButton("Save + Next Student")', source)
 
-    def test_question_mode_card_uses_size_hint_stabilization(self):
+    def test_workflow_card_uses_size_hint_stabilization_without_large_fixed_height(self):
         source = _segment("apply_current_workflow_view")
-        self.assertIn("self.question_mode_controls.setMinimumHeight(92)", source)
-        self.assertIn("self.workflow_card.setMinimumHeight(206)", source)
+        self.assertIn("self.workflow_card.setMinimumHeight(0)", source)
         self.assertIn("central_layout.invalidate()", source)
         self.assertIn("central_layout.activate()", source)
         self.assertIn("QTimer.singleShot(0, self._stabilize_question_mode_layout)", source)
 
         stabilizer = _segment("_stabilize_question_mode_layout")
-        self.assertIn("self.question_mode_controls.sizeHint().height()", stabilizer)
         self.assertIn("self.workflow_card.sizeHint().height()", stabilizer)
-
-    def test_question_mode_has_gap_before_questions_attempted_group(self):
-        source = _segment("init_ui")
-        self.assertIn("session_layout.addSpacing(6)", source)
 
     def test_light_theme_forces_fusion_and_legible_editors(self):
         source = _STYLE_PATH.read_text(encoding="utf-8")
@@ -105,10 +92,11 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
         self.assertIn("self.questions_to_count.value() * self.points_per_question.value()", source)
 
 
-    def test_grades_and_evidence_folder_label_is_unambiguous(self):
+    def test_workspace_action_is_unambiguous_but_moved_into_setup_menu(self):
         source = _segment("init_ui")
-        self.assertIn('QPushButton("Grades + Evidence Folder")', source)
+        self.assertIn('"Choose Workspace…"', source)
         self.assertIn("assessment JSON files and persistent submission evidence", source)
+        self.assertIn("self.setup_menu_button", source)
 
     def test_small_rubric_clamps_stale_generic_fixed_total(self):
         source = _segment("load_rubric")
@@ -127,7 +115,7 @@ class TestManualAcceptanceRegressions(unittest.TestCase):
         source = _segment("init_ui")
         self.assertIn("session_workspace_splitter = PersistentGripSplitter(Qt.Vertical)", source)
         self.assertIn("session_workspace_splitter.setHandleWidth(12)", source)
-        self.assertIn("session_workspace_splitter.setSizes([235, 665])", source)
+        self.assertIn("session_workspace_splitter.setSizes([185, 715])", source)
 
     def test_question_summary_collapse_control_is_persisted(self):
         save = _segment("_save_ui_preferences")

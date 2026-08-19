@@ -10,11 +10,13 @@ _SOURCE = _PATH.read_text(encoding="utf-8")
 
 
 class TestSubmissionImportMainWindowV232(unittest.TestCase):
-    def test_preferred_canonical_import_action_is_added_without_removing_legacy_loader(self):
+    def test_preferred_canonical_import_stays_primary_and_legacy_loader_moves_to_tools(self):
         self.assertIn('self.import_submissions_btn = QPushButton("Import Submissions")', _SOURCE)
         self.assertIn('self.import_submissions_btn.clicked.connect(self.show_submission_import_dialog)', _SOURCE)
-        self.assertIn('self.load_submissions_btn = QPushButton("Load Submissions")', _SOURCE)
-        self.assertIn('self.load_submissions_btn.clicked.connect(self.load_submissions_folder)', _SOURCE)
+        self.assertIn('self.load_submissions_btn = QAction(', _SOURCE)
+        self.assertIn('"Load LaTeX Submissions (v2.2)…"', _SOURCE)
+        self.assertIn('self.load_submissions_btn.triggered.connect(self.load_submissions_folder)', _SOURCE)
+        self.assertIn('legacy_menu.addAction(self.load_submissions_btn)', _SOURCE)
 
     def test_history_action_is_available_from_tools(self):
         self.assertIn('"Submission History"', _SOURCE)

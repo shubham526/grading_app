@@ -40,7 +40,7 @@ class TestQuestionModeSaveResumeV232(unittest.TestCase):
 
     def test_question_mode_full_snapshot_allows_incomplete_progress(self):
         source = _segment("_build_complete_current_assessment")
-        self.assertIn("validate=(self.workflow_mode != QUESTION_CENTRIC)", source)
+        self.assertIn("get_assessment_data(self, validate=False)", source)
         self.assertIn("update_grading_progress_metadata", source)
         self.assertIn("question_id=self.current_question_id", source)
 
@@ -52,7 +52,8 @@ class TestQuestionModeSaveResumeV232(unittest.TestCase):
 
     def test_question_controls_are_unambiguous(self):
         self.assertIn('QPushButton("Save Question")', _SOURCE)
-        self.assertIn('QPushButton("Save Assessment As…")', _SOURCE)
+        self.assertIn('"Save Assessment As…"', _SOURCE)
+        self.assertIn('self.save_assessment_as_action = QAction', _SOURCE)
         self.assertIn('QPushButton("Save Assessment")', _SOURCE)
 
     def test_question_save_and_navigation_update_resume_checkpoint(self):

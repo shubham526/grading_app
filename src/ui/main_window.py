@@ -103,7 +103,6 @@ _UI_MAXIMIZED_KEY = "maximized"
 _UI_SESSION_SPLITTER_KEY = "session_workspace_splitter_v2"
 _UI_WORKSPACE_SPLITTER_KEY = "workspace_splitter_horizontal_v2"
 _UI_GRADING_SPLITTER_KEY = "grading_splitter"
-_UI_GRADING_CARD_COLLAPSED_KEY = "grading_card_collapsed"
 _UI_QUESTION_SUMMARY_COLLAPSED_KEY = "question_summary_collapsed"
 _UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY = "attempted_questions_visible"
 
@@ -164,6 +163,7 @@ class RubricGrader(QMainWindow):
         self.assessments_dir = None
         self.roster_file_path = None
         self.question_mode_dirty = False
+        self.student_mode_dirty = False
         self._loading_question_student = False
         self._changing_workflow_mode = False
         self._changing_question_combo = False
@@ -252,9 +252,12 @@ class RubricGrader(QMainWindow):
         main_layout.addWidget(divider)
 
         # ---------------------- primary action toolbar ----------------------
+        # Routine grading keeps only the two most common actions visible.
+        # One-time setup, reporting, legacy compatibility, and settings live in
+        # compact menus so the grading workspace owns the visual hierarchy.
         toolbar_container = QWidget()
         toolbar_layout = QHBoxLayout(toolbar_container)
-        toolbar_layout.setContentsMargins(0, 2, 0, 2)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(8)
 
         self.load_btn = QPushButton("Load Rubric")
@@ -271,51 +274,64 @@ class RubricGrader(QMainWindow):
         self.import_submissions_btn.clicked.connect(self.show_submission_import_dialog)
         toolbar_layout.addWidget(self.import_submissions_btn)
 
-        # Keep the proven v2.2 LaTeX-folder path available during the v2.3.2
-        # transition. The new canonical importer above is the preferred path.
-        self.load_submissions_btn = QPushButton("Load Submissions")
-        self.load_submissions_btn.setIcon(qta.icon('fa5s.file-code'))
-        self.load_submissions_btn.setToolTip("Load normal LaTeX submissions using the legacy v2.2 folder workflow")
-        self.load_submissions_btn.clicked.connect(self.load_submissions_folder)
-        toolbar_layout.addWidget(self.load_submissions_btn)
-
-        self.load_reference_solution_btn = QPushButton("Load Reference Solution")
-        self.load_reference_solution_btn.setIcon(qta.icon('fa5s.check-circle'))
-        self.load_reference_solution_btn.setToolTip(
-            "Load an instructor reference solution; LaTeX is recommended, digital PDF is supported"
-        )
-        self.load_reference_solution_btn.clicked.connect(self.load_reference_solution_file)
-        toolbar_layout.addWidget(self.load_reference_solution_btn)
-
-        self.add_pdf_accommodation_btn = QPushButton("Add PDF Accommodation")
-        self.add_pdf_accommodation_btn.setIcon(qta.icon('fa5s.file-pdf'))
-        self.add_pdf_accommodation_btn.setToolTip(
-            "Explicitly associate a PDF-only accommodation submission with a student"
-        )
-        self.add_pdf_accommodation_btn.clicked.connect(self.add_pdf_accommodation)
-        toolbar_layout.addWidget(self.add_pdf_accommodation_btn)
-
-        self.load_assessment_folder_btn = QPushButton("Grades + Evidence Folder")
-        self.load_assessment_folder_btn.setIcon(qta.icon('fa5s.folder'))
-        self.load_assessment_folder_btn.setToolTip(
-            "Choose where assessment JSON files and persistent submission evidence are stored"
-        )
-        self.load_assessment_folder_btn.clicked.connect(self.load_assessment_folder)
-        toolbar_layout.addWidget(self.load_assessment_folder_btn)
-
-        self.load_roster_btn = QPushButton("Load Roster")
-        self.load_roster_btn.setIcon(qta.icon('fa5s.users'))
-        self.load_roster_btn.clicked.connect(self.load_roster)
-        toolbar_layout.addWidget(self.load_roster_btn)
-
         toolbar_layout.addStretch(1)
 
-        self.analytics_btn = QPushButton("Analytics")
-        self.analytics_btn.setIcon(qta.icon('fa5s.chart-bar'))
-        self.analytics_btn.clicked.connect(self.show_analytics)
-        toolbar_layout.addWidget(self.analytics_btn)
+        setup_menu = QMenu(self)
+        self.load_assessment_folder_action = QAction(
+            qta.icon('fa5s.folder'), "Choose Workspace…", self
+        )
+        self.load_assessment_folder_action.setToolTip(
+            "Choose where assessment JSON files and persistent submission evidence are stored"
+        )
+        self.load_assessment_folder_action.triggered.connect(self.load_assessment_folder)
+        setup_menu.addAction(self.load_assessment_folder_action)
+
+        self.load_roster_action = QAction(qta.icon('fa5s.users'), "Load Roster…", self)
+        self.load_roster_action.triggered.connect(self.load_roster)
+        setup_menu.addAction(self.load_roster_action)
+
+        self.load_reference_solution_action = QAction(
+            qta.icon('fa5s.check-circle'), "Load Reference Solution…", self
+        )
+        self.load_reference_solution_action.setToolTip(
+            "Load an instructor reference solution; LaTeX is recommended, digital PDF is supported"
+        )
+        self.load_reference_solution_action.triggered.connect(self.load_reference_solution_file)
+        setup_menu.addAction(self.load_reference_solution_action)
+        setup_menu.addSeparator()
+
+        self.add_pdf_accommodation_action = QAction(
+            qta.icon('fa5s.file-pdf'), "Add PDF Accommodation…", self
+        )
+        self.add_pdf_accommodation_action.setToolTip(
+            "Explicitly associate a PDF-only accommodation submission with a student"
+        )
+        self.add_pdf_accommodation_action.triggered.connect(self.add_pdf_accommodation)
+        setup_menu.addAction(self.add_pdf_accommodation_action)
+
+        # Compatibility aliases retained for callers that still reference the
+        # previous button attributes. These are QAction objects in v2.3.2+.
+        self.load_assessment_folder_btn = self.load_assessment_folder_action
+        self.load_roster_btn = self.load_roster_action
+        self.load_reference_solution_btn = self.load_reference_solution_action
+        self.add_pdf_accommodation_btn = self.add_pdf_accommodation_action
+
+        self.setup_menu_button = QToolButton()
+        self.setup_menu_button.setText("Setup")
+        self.setup_menu_button.setIcon(qta.icon('fa5s.folder-plus'))
+        self.setup_menu_button.setProperty("toolbarMenu", True)
+        self.setup_menu_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setup_menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.setup_menu_button.setMenu(setup_menu)
+        toolbar_layout.addWidget(self.setup_menu_button)
 
         reports_menu = QMenu(self)
+        self.analytics_btn = QAction(qta.icon('fa5s.chart-bar'), "Analytics", self)
+        self.analytics_btn.triggered.connect(self.show_analytics)
+        self.analytics_btn.setEnabled(False)
+        reports_menu.addAction(self.analytics_btn)
+        reports_menu.addSeparator()
+
         self.abet_report_btn = QAction(qta.icon('fa5s.file-contract'), "ABET Report", self)
         self.abet_report_btn.triggered.connect(self.show_abet_report)
         reports_menu.addAction(self.abet_report_btn)
@@ -346,6 +362,7 @@ class RubricGrader(QMainWindow):
         self.reports_menu_button = QToolButton()
         self.reports_menu_button.setText("Reports")
         self.reports_menu_button.setIcon(qta.icon('fa5s.file-alt'))
+        self.reports_menu_button.setProperty("toolbarMenu", True)
         self.reports_menu_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.reports_menu_button.setPopupMode(QToolButton.InstantPopup)
         self.reports_menu_button.setMenu(reports_menu)
@@ -378,10 +395,24 @@ class RubricGrader(QMainWindow):
         )
         self.resume_grading_session_action.triggered.connect(self.resume_grading_session)
         tools_menu.addAction(self.resume_grading_session_action)
+        tools_menu.addSeparator()
+
+        legacy_menu = QMenu("Legacy", self)
+        legacy_menu.setIcon(qta.icon('fa5s.archive'))
+        self.load_submissions_btn = QAction(
+            qta.icon('fa5s.file-code'), "Load LaTeX Submissions (v2.2)…", self
+        )
+        self.load_submissions_btn.setToolTip(
+            "Legacy v2.2 LaTeX-folder loader; canonical Import Submissions is preferred"
+        )
+        self.load_submissions_btn.triggered.connect(self.load_submissions_folder)
+        legacy_menu.addAction(self.load_submissions_btn)
+        tools_menu.addMenu(legacy_menu)
 
         self.tools_menu_button = QToolButton()
         self.tools_menu_button.setText("Tools")
         self.tools_menu_button.setIcon(qta.icon('fa5s.tools'))
+        self.tools_menu_button.setProperty("toolbarMenu", True)
         self.tools_menu_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.tools_menu_button.setPopupMode(QToolButton.InstantPopup)
         self.tools_menu_button.setMenu(tools_menu)
@@ -408,6 +439,7 @@ class RubricGrader(QMainWindow):
         self.settings_menu_button = QToolButton()
         self.settings_menu_button.setText("Settings")
         self.settings_menu_button.setIcon(qta.icon('fa5s.cog'))
+        self.settings_menu_button.setProperty("toolbarMenu", True)
         self.settings_menu_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.settings_menu_button.setPopupMode(QToolButton.InstantPopup)
         self.settings_menu_button.setMenu(settings_menu)
@@ -424,75 +456,65 @@ class RubricGrader(QMainWindow):
         session_layout.setContentsMargins(0, 0, 0, 0)
         session_layout.setSpacing(10)
 
-        # ----------------------- student/assignment context -----------------------
-        self.info_widget = QWidget()
-        info_widget = self.info_widget
-        info_layout = QHBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(12)
+        # ----------------------- compact assessment context -----------------------
+        self.info_widget = QFrame()
+        self.info_widget.setObjectName("assessmentContextStrip")
+        info_layout = QHBoxLayout(self.info_widget)
+        info_layout.setContentsMargins(12, 7, 12, 7)
+        info_layout.setSpacing(8)
 
-        student_container = QWidget()
-        student_layout = QVBoxLayout(student_container)
-        student_layout.setContentsMargins(0, 0, 0, 0)
-        student_layout.setSpacing(3)
-        student_label = QLabel("Student")
-        student_label.setStyleSheet("color: #667085; font-size: 11px;")
-        student_layout.addWidget(student_label)
-        self.student_name_edit = QLineEdit()
-        self.student_name_edit.setPlaceholderText("Enter student name or load roster")
-        self.student_name_edit.editingFinished.connect(self._on_manual_student_context_changed)
-        student_layout.addWidget(self.student_name_edit)
-        info_layout.addWidget(student_container, 2)
+        assessment_caption = QLabel("Assessment")
+        assessment_caption.setObjectName("contextCaption")
+        info_layout.addWidget(assessment_caption)
 
-        assignment_container = QWidget()
-        assignment_layout = QVBoxLayout(assignment_container)
-        assignment_layout.setContentsMargins(0, 0, 0, 0)
-        assignment_layout.setSpacing(3)
-        assignment_label = QLabel("Assignment")
-        assignment_label.setStyleSheet("color: #667085; font-size: 11px;")
-        assignment_layout.addWidget(assignment_label)
         self.assignment_name_edit = QLineEdit()
         self.assignment_name_edit.setPlaceholderText("Assignment name")
-        assignment_layout.addWidget(self.assignment_name_edit)
-        info_layout.addWidget(assignment_container, 2)
+        self.assignment_name_edit.setMinimumWidth(260)
+        self.assignment_name_edit.setMaximumWidth(520)
+        self.assignment_name_edit.setToolTip("Current assessment title")
+        info_layout.addWidget(self.assignment_name_edit, 2)
 
-        self.status_label = QLabel("Load a rubric to begin grading")
-        self.status_label.setStyleSheet("color: #667085;")
-        self.status_label.setWordWrap(True)
-        info_layout.addWidget(self.status_label, 3)
-        session_layout.addWidget(info_widget)
+        self.status_label = QLabel("No rubric loaded")
+        self.status_label.setObjectName("contextMeta")
+        self.status_label.setWordWrap(False)
+        info_layout.addWidget(self.status_label, 1)
+        info_layout.addStretch(1)
 
-        # ----------------------- compact grading summary -----------------------
-        self.config_card = CardWidget("Grading", collapsible=True, initially_collapsed=True)
-        config_layout = self.config_card.get_content_layout()
-        self.config_info = QLabel()
-        self.config_info.setWordWrap(True)
-        config_layout.addWidget(self.config_info)
-        session_layout.addWidget(self.config_card)
-        self.update_config_info()
+        workspace_caption = QLabel("Workspace")
+        workspace_caption.setObjectName("contextCaption")
+        info_layout.addWidget(workspace_caption)
+        self.assessment_folder_label = QLabel("Not selected")
+        self.assessment_folder_label.setObjectName("workspacePathLabel")
+        self.assessment_folder_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.assessment_folder_label.setMinimumWidth(180)
+        info_layout.addWidget(self.assessment_folder_label, 1)
+        session_layout.addWidget(self.info_widget)
 
         # ------------------------- workflow/context card -------------------------
         self.workflow_card = CardWidget("Grading Context")
         workflow_layout = self.workflow_card.get_content_layout()
 
         workflow_top = QHBoxLayout()
+        workflow_top.setSpacing(8)
         workflow_top.addWidget(QLabel("Workflow"))
         self.workflow_mode_combo = VisibleArrowComboBox()
         self.workflow_mode_combo.addItem("Student-by-student", STUDENT_CENTRIC)
         self.workflow_mode_combo.addItem("Question-by-question", QUESTION_CENTRIC)
         self.workflow_mode_combo.setMinimumWidth(190)
+        self.workflow_mode_combo.setMaximumWidth(240)
         workflow_top.addWidget(self.workflow_mode_combo)
-        workflow_top.addSpacing(12)
-        workflow_top.addWidget(QLabel("Assessment workspace"))
-        self.assessment_folder_label = QLabel("Not selected")
-        self.assessment_folder_label.setStyleSheet("color: #667085; font-size: 11px;")
-        self.assessment_folder_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        workflow_top.addWidget(self.assessment_folder_label, 1)
+        workflow_top.addSpacing(10)
+
+        self.config_info = QLabel()
+        self.config_info.setObjectName("gradingSummaryLabel")
+        self.config_info.setWordWrap(False)
+        workflow_top.addWidget(self.config_info, 1)
 
         self.attempted_questions_button = QToolButton()
         self.attempted_questions_button.setText("Attempted Questions")
         self.attempted_questions_button.setCheckable(True)
         self.attempted_questions_button.setChecked(False)
+        self.attempted_questions_button.setProperty("toolbarMenu", True)
         self.attempted_questions_button.setToolTip(
             "Show or hide the student's attempted-question controls"
         )
@@ -501,55 +523,88 @@ class RubricGrader(QMainWindow):
         )
         workflow_top.addWidget(self.attempted_questions_button)
         workflow_layout.addLayout(workflow_top)
+        self.update_config_info()
 
+        # Question navigation appears only in Question-by-question mode.
         self.question_mode_controls = QWidget()
         self.question_mode_controls.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         question_mode_layout = QVBoxLayout(self.question_mode_controls)
-        question_mode_layout.setContentsMargins(0, 6, 0, 2)
-        question_mode_layout.setSpacing(8)
+        question_mode_layout.setContentsMargins(0, 2, 0, 0)
+        question_mode_layout.setSpacing(6)
 
-        # Keep question-centric mode to two compact rows.  Earlier versions put
-        # the save actions on a third row; on macOS that row could be squeezed
-        # under the following QGroupBox title even on a large window.
         question_row = QHBoxLayout()
         question_row.setSpacing(8)
         question_row.addWidget(QLabel("Question"))
+
+        self.prev_question_btn = QPushButton("‹")
+        self.prev_question_btn.setFixedWidth(36)
+        self.prev_question_btn.setToolTip("Previous question")
+        self.prev_question_btn.clicked.connect(lambda: self.navigate_question(-1))
+        question_row.addWidget(self.prev_question_btn)
+
         self.question_combo = VisibleArrowComboBox()
         self.question_combo.setMinimumWidth(120)
         self.question_combo.setMaximumWidth(180)
         question_row.addWidget(self.question_combo)
 
-        self.prev_question_btn = QPushButton("Previous Question")
-        self.prev_question_btn.clicked.connect(lambda: self.navigate_question(-1))
-        question_row.addWidget(self.prev_question_btn)
-        self.next_question_btn = QPushButton("Next Question")
+        self.next_question_btn = QPushButton("›")
+        self.next_question_btn.setFixedWidth(36)
+        self.next_question_btn.setToolTip("Next question")
         self.next_question_btn.clicked.connect(lambda: self.navigate_question(1))
         question_row.addWidget(self.next_question_btn)
-        question_row.addSpacing(18)
+        question_row.addSpacing(10)
 
         self.question_progress_label = QLabel("Question progress: —")
         self.question_progress_label.setStyleSheet("font-weight: 600;")
         question_row.addWidget(self.question_progress_label)
-        question_row.addSpacing(16)
+        question_row.addSpacing(12)
         self.overall_progress_label = QLabel("Overall progress: —")
         question_row.addWidget(self.overall_progress_label)
         question_row.addStretch(1)
         question_mode_layout.addLayout(question_row)
+        self.question_mode_controls.setVisible(False)
+        workflow_layout.addWidget(self.question_mode_controls)
 
-        student_row = QHBoxLayout()
+        # Student navigation is shared by both workflows. With a roster/folder,
+        # use the stable record dropdown; without one, retain manual-name entry.
+        self.student_navigation_controls = QWidget()
+        student_row = QHBoxLayout(self.student_navigation_controls)
+        student_row.setContentsMargins(0, 2, 0, 0)
         student_row.setSpacing(8)
         student_row.addWidget(QLabel("Student"))
-        self.student_combo = VisibleArrowComboBox()
-        self.student_combo.setMinimumWidth(220)
-        student_row.addWidget(self.student_combo, 1)
 
-        self.prev_student_btn = QPushButton("Previous Student")
+        self.prev_student_btn = QPushButton("‹")
+        self.prev_student_btn.setFixedWidth(36)
+        self.prev_student_btn.setToolTip("Previous student")
         self.prev_student_btn.clicked.connect(lambda: self.navigate_student(-1))
         student_row.addWidget(self.prev_student_btn)
-        self.next_student_btn = QPushButton("Next Student")
+
+        self.student_combo = VisibleArrowComboBox()
+        self.student_combo.setMinimumWidth(240)
+        self.student_combo.setMaximumWidth(420)
+        student_row.addWidget(self.student_combo, 1)
+
+        self.student_name_edit = QLineEdit()
+        self.student_name_edit.setPlaceholderText("Enter student name or load a roster")
+        self.student_name_edit.editingFinished.connect(self._on_manual_student_context_changed)
+        student_row.addWidget(self.student_name_edit, 1)
+
+        self.next_student_btn = QPushButton("›")
+        self.next_student_btn.setFixedWidth(36)
+        self.next_student_btn.setToolTip("Next student")
         self.next_student_btn.clicked.connect(lambda: self.navigate_student(1))
         student_row.addWidget(self.next_student_btn)
-        student_row.addSpacing(10)
+
+        self.student_position_label = QLabel("No roster")
+        self.student_position_label.setObjectName("contextMeta")
+        self.student_position_label.setMinimumWidth(62)
+        student_row.addWidget(self.student_position_label)
+        student_row.addSpacing(8)
+
+        self.question_mode_actions = QWidget()
+        question_actions_layout = QHBoxLayout(self.question_mode_actions)
+        question_actions_layout.setContentsMargins(0, 0, 0, 0)
+        question_actions_layout.setSpacing(6)
 
         self.save_question_btn = QPushButton("Save Question")
         self.save_question_btn.setIcon(qta.icon('fa5s.save'))
@@ -558,32 +613,43 @@ class RubricGrader(QMainWindow):
         self.save_question_btn.clicked.connect(
             lambda: self.save_current_question(show_success=True)
         )
-        student_row.addWidget(self.save_question_btn)
+        question_actions_layout.addWidget(self.save_question_btn)
 
         self.save_next_student_btn = QPushButton("Save + Next")
-        self.save_next_student_btn.setToolTip("Save the current question and move to the next student")
+        self.save_next_student_btn.setToolTip(
+            "Save the current question and move to the next student"
+        )
         self.save_next_student_btn.clicked.connect(self.save_and_next_student)
-        student_row.addWidget(self.save_next_student_btn)
+        question_actions_layout.addWidget(self.save_next_student_btn)
 
         self.mark_question_complete_btn = QPushButton("Mark Complete")
-        self.mark_question_complete_btn.setToolTip("Mark the current question complete for this student")
+        self.mark_question_complete_btn.setToolTip(
+            "Mark the current question complete for this student"
+        )
         self.mark_question_complete_btn.clicked.connect(self.mark_current_question_complete)
-        student_row.addWidget(self.mark_question_complete_btn)
-        question_mode_layout.addLayout(student_row)
+        question_actions_layout.addWidget(self.mark_question_complete_btn)
+        student_row.addWidget(self.question_mode_actions)
 
-        self.question_mode_controls.setMinimumHeight(92)
-        self.question_mode_controls.setVisible(False)
-        workflow_layout.addWidget(self.question_mode_controls)
+        self.student_mode_actions = QWidget()
+        student_actions_layout = QHBoxLayout(self.student_mode_actions)
+        student_actions_layout.setContentsMargins(0, 0, 0, 0)
+        student_actions_layout.setSpacing(6)
+        self.save_next_assessment_btn = QPushButton("Save + Next Student")
+        self.save_next_assessment_btn.setIcon(qta.icon('fa5s.step-forward'))
+        self.save_next_assessment_btn.setToolTip(
+            "Save the complete current assessment and move to the next student"
+        )
+        self.save_next_assessment_btn.clicked.connect(self.save_and_next_student_assessment)
+        student_actions_layout.addWidget(self.save_next_assessment_btn)
+        student_row.addWidget(self.student_mode_actions)
+
+        workflow_layout.addWidget(self.student_navigation_controls)
         session_layout.addWidget(self.workflow_card)
-
-        # QGroupBox titles consume space above their content.  Keep a small
-        # explicit gap so the following 'Questions Attempted' title can never
-        # paint over the bottom row of the grading-context card.
-        session_layout.addSpacing(6)
 
         self.workflow_mode_combo.currentIndexChanged.connect(self.on_workflow_mode_changed)
         self.question_combo.currentIndexChanged.connect(self.on_question_combo_changed)
         self.student_combo.currentIndexChanged.connect(self.on_student_combo_changed)
+        self._update_student_navigation_visibility()
 
         # Existing selected/attempted-question controls remain available because
         # the display workflow must not change selected/counted scoring semantics.
@@ -726,7 +792,7 @@ class RubricGrader(QMainWindow):
         self.session_workspace_splitter.addWidget(self.workspace_host)
         self.session_workspace_splitter.setStretchFactor(0, 2)
         self.session_workspace_splitter.setStretchFactor(1, 7)
-        self.session_workspace_splitter.setSizes([235, 665])
+        self.session_workspace_splitter.setSizes([185, 715])
         main_layout.addWidget(self.session_workspace_splitter, 1)
 
         # ------------------------- bottom grading controls -------------------------
@@ -746,18 +812,33 @@ class RubricGrader(QMainWindow):
         self.save_assessment_btn.setIcon(qta.icon('fa5s.save'))
         self.save_assessment_btn.setProperty("buttonRole", "primary")
         self.save_assessment_btn.setToolTip(
-            "Save the complete current student's assessment to its current assessment file"
+            "Save the complete current student's assessment"
         )
-        self.save_assessment_btn.clicked.connect(self.save_assessment)
+        self.save_assessment_btn.clicked.connect(
+            lambda _checked=False: self.save_assessment(show_success=True)
+        )
         bottom_layout.addWidget(self.save_assessment_btn)
 
-        self.save_assessment_as_btn = QPushButton("Save Assessment As…")
-        self.save_assessment_as_btn.setIcon(qta.icon('fa5s.file-export'))
-        self.save_assessment_as_btn.setToolTip(
-            "Save the complete current student's assessment to a new file/location"
+        save_menu = QMenu(self)
+        self.save_assessment_as_action = QAction(
+            qta.icon('fa5s.file-export'), "Save Assessment As…", self
         )
-        self.save_assessment_as_btn.clicked.connect(self.save_assessment_as)
-        bottom_layout.addWidget(self.save_assessment_as_btn)
+        self.save_assessment_as_action.triggered.connect(
+            lambda _checked=False: self.save_assessment_as(show_success=True)
+        )
+        save_menu.addAction(self.save_assessment_as_action)
+
+        self.save_assessment_menu_button = QToolButton()
+        self.save_assessment_menu_button.setIcon(qta.icon('fa5s.ellipsis-h'))
+        self.save_assessment_menu_button.setToolTip("More save options")
+        self.save_assessment_menu_button.setProperty("toolbarMenu", True)
+        self.save_assessment_menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.save_assessment_menu_button.setMenu(save_menu)
+        bottom_layout.addWidget(self.save_assessment_menu_button)
+
+        # Compatibility alias for callers/tests that referenced the previous
+        # full-width Save Assessment As button.
+        self.save_assessment_as_btn = self.save_assessment_as_action
 
         load_assessment_btn = QPushButton("Load Assessment")
         load_assessment_btn.setIcon(qta.icon('fa5s.file-upload'))
@@ -823,7 +904,7 @@ class RubricGrader(QMainWindow):
             )
             sizes = self._workspace_sizes_before_focus or [760, 640]
             self.workspace_splitter.setSizes(sizes)
-            session_sizes = self._session_sizes_before_focus or [235, 665]
+            session_sizes = self._session_sizes_before_focus or [185, 715]
             self.session_workspace_splitter.setSizes(session_sizes)
             self._workspace_sizes_before_focus = None
             self._session_sizes_before_focus = None
@@ -895,11 +976,11 @@ class RubricGrader(QMainWindow):
 
         prev_student = QPushButton("Previous Student", popout_header)
         prev_student.clicked.connect(lambda: self.navigate_student(-1))
-        prev_student.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        prev_student.setVisible(bool(self.student_records))
         header_layout.addWidget(prev_student)
         next_student = QPushButton("Next Student", popout_header)
         next_student.clicked.connect(lambda: self.navigate_student(1))
-        next_student.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        next_student.setVisible(bool(self.student_records))
         header_layout.addWidget(next_student)
 
         save_button = QPushButton(
@@ -921,8 +1002,14 @@ class RubricGrader(QMainWindow):
 
             save_assessment = QPushButton("Save Assessment", popout_header)
             save_assessment.setToolTip("Save the complete current student's assessment")
-            save_assessment.clicked.connect(self.save_assessment)
+            save_assessment.clicked.connect(
+                lambda _checked=False: self.save_assessment(show_success=True)
+            )
             header_layout.addWidget(save_assessment)
+        elif self.student_records:
+            save_next = QPushButton("Save + Next Student", popout_header)
+            save_next.clicked.connect(self.save_and_next_student_assessment)
+            header_layout.addWidget(save_next)
 
         reattach = QPushButton("Reattach", popout_header)
         reattach.clicked.connect(self._reattach_grading_workspace)
@@ -972,6 +1059,21 @@ class RubricGrader(QMainWindow):
     def _submission_question_ids(self):
         """Return the canonical rubric question IDs used for submission splitting."""
         return get_question_ids(self.rubric_data or {}, include_unassigned=False)
+
+    def _set_assessment_workspace_path(self, path):
+        """Show a compact workspace path while retaining the full path as tooltip."""
+        if not hasattr(self, "assessment_folder_label"):
+            return
+        if not path:
+            self.assessment_folder_label.setText("Not selected")
+            self.assessment_folder_label.setToolTip("")
+            return
+        absolute = os.path.abspath(path)
+        base = os.path.basename(absolute.rstrip(os.sep)) or absolute
+        parent = os.path.basename(os.path.dirname(absolute.rstrip(os.sep)))
+        display = f"…/{parent}/{base}" if parent else base
+        self.assessment_folder_label.setText(display)
+        self.assessment_folder_label.setToolTip(absolute)
 
     def _configure_submission_evidence_root(self):
         """Point persistent evidence at the current assessment workspace."""
@@ -1939,7 +2041,6 @@ class RubricGrader(QMainWindow):
             )
             store.setValue(_UI_WORKSPACE_SPLITTER_KEY, self.workspace_splitter.saveState())
             store.setValue(_UI_GRADING_SPLITTER_KEY, self.main_splitter.saveState())
-            store.setValue(_UI_GRADING_CARD_COLLAPSED_KEY, self.config_card.is_collapsed())
             store.setValue(
                 _UI_QUESTION_SUMMARY_COLLAPSED_KEY,
                 self.question_summary_card.is_collapsed(),
@@ -1961,9 +2062,6 @@ class RubricGrader(QMainWindow):
             session_state = store.value(_UI_SESSION_SPLITTER_KEY)
             workspace_state = store.value(_UI_WORKSPACE_SPLITTER_KEY)
             grading_state = store.value(_UI_GRADING_SPLITTER_KEY)
-            grading_card_collapsed = store.value(
-                _UI_GRADING_CARD_COLLAPSED_KEY, True, type=bool
-            )
             question_summary_collapsed = store.value(
                 _UI_QUESTION_SUMMARY_COLLAPSED_KEY, True, type=bool
             )
@@ -1988,7 +2086,6 @@ class RubricGrader(QMainWindow):
         self.session_workspace_splitter.setOrientation(Qt.Vertical)
         self.workspace_splitter.setOrientation(Qt.Horizontal)
         self.main_splitter.setOrientation(Qt.Vertical)
-        self.config_card.set_collapsed(grading_card_collapsed)
         self.question_summary_card.set_collapsed(question_summary_collapsed)
         self.attempted_questions_button.setChecked(attempted_questions_visible)
         self._set_questions_attempted_visible(attempted_questions_visible)
@@ -2002,7 +2099,7 @@ class RubricGrader(QMainWindow):
 
     def _ensure_usable_splitter_sizes(self):
         self._normalize_splitter_sizes(
-            self.session_workspace_splitter, minimums=(140, 320), fallback=(235, 665)
+            self.session_workspace_splitter, minimums=(120, 320), fallback=(185, 715)
         )
         self._normalize_splitter_sizes(
             self.workspace_splitter, minimums=(460, 420), fallback=(760, 640)
@@ -2208,8 +2305,17 @@ class RubricGrader(QMainWindow):
             self.export_btn.setEnabled(True)
             self.config_btn.setEnabled(True)
             self.abet_mapping_btn.setEnabled(True)
-            self.status_bar.set_status(f"Loaded rubric: {os.path.basename(file_path)}")
-            self.status_label.setText(f"Loaded rubric: {os.path.basename(file_path)}")
+            rubric_filename = os.path.basename(file_path)
+            assessment_id = str(
+                (self.rubric_data or {}).get("assessment_id")
+                or (self.rubric_data or {}).get("assignment_id")
+                or ""
+            ).strip()
+            self.status_bar.set_status(f"Loaded rubric: {rubric_filename}")
+            self.status_label.setText(
+                f"{assessment_id} · {rubric_filename}" if assessment_id else rubric_filename
+            )
+            self.status_label.setToolTip(os.path.abspath(file_path))
             self.analytics_btn.setEnabled(True)
 
             self.refresh_workflow_questions()
@@ -2224,17 +2330,29 @@ class RubricGrader(QMainWindow):
 
     def on_criterion_points_changed(self):
         update_total_points(self)
-        if self.workflow_mode == QUESTION_CENTRIC and not self._loading_question_student:
+        if self._loading_question_student:
+            return
+        if self.workflow_mode == QUESTION_CENTRIC:
             self.question_mode_dirty = True
+        else:
+            self.student_mode_dirty = True
 
     def on_criterion_content_changed(self):
-        if self.workflow_mode == QUESTION_CENTRIC and not self._loading_question_student:
+        if self._loading_question_student:
+            return
+        if self.workflow_mode == QUESTION_CENTRIC:
             self.question_mode_dirty = True
+        else:
+            self.student_mode_dirty = True
 
     def on_question_selection_changed(self):
         update_total_points(self)
-        if self.workflow_mode == QUESTION_CENTRIC and not self._loading_question_student:
+        if self._loading_question_student:
+            return
+        if self.workflow_mode == QUESTION_CENTRIC:
             self.question_mode_dirty = True
+        else:
+            self.student_mode_dirty = True
 
     def get_selected_questions(self):
         if not hasattr(self, 'question_checkboxes') or not self.question_checkboxes:
@@ -2285,6 +2403,8 @@ class RubricGrader(QMainWindow):
             update_total_points(self)
             if self.workflow_mode == QUESTION_CENTRIC:
                 self.question_mode_dirty = True
+            else:
+                self.student_mode_dirty = True
 
     # ------------------------------------------------------------------
     # v2.1 workflow mode, question filtering, and student sources
@@ -2337,6 +2457,10 @@ class RubricGrader(QMainWindow):
             if not self._confirm_dirty_navigation("switch grading workflows"):
                 self._set_workflow_combo(self.workflow_mode)
                 return
+        elif self.workflow_mode == STUDENT_CENTRIC and self.student_mode_dirty:
+            if not self.save_assessment(show_success=False):
+                self._set_workflow_combo(self.workflow_mode)
+                return
 
         self.workflow_mode = requested
         self.apply_current_workflow_view()
@@ -2353,12 +2477,14 @@ class RubricGrader(QMainWindow):
             self._changing_workflow_mode = False
 
     def apply_current_workflow_view(self):
-        if self.workflow_mode == QUESTION_CENTRIC:
-            self.question_mode_controls.setVisible(True)
-            self.question_mode_controls.setMinimumHeight(92)
-            self.workflow_card.setMinimumHeight(206)
-            self.workflow_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            self.student_name_edit.setReadOnly(bool(self.student_records))
+        question_mode = self.workflow_mode == QUESTION_CENTRIC
+        self.question_mode_controls.setVisible(question_mode)
+        self.question_mode_actions.setVisible(question_mode)
+        self.student_mode_actions.setVisible(not question_mode)
+        self.workflow_card.setMinimumHeight(0)
+        self.workflow_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        if question_mode:
             if self.current_question_id is None:
                 self.refresh_workflow_questions()
             self.submission_controller.set_current_question(self.current_question_id)
@@ -2378,33 +2504,30 @@ class RubricGrader(QMainWindow):
                 self.update_question_progress_display()
                 self._notify_submission_context_changed()
         else:
-            self.question_mode_controls.setVisible(False)
-            self.question_mode_controls.setMinimumHeight(0)
-            self.workflow_card.setMinimumHeight(0)
-            self.student_name_edit.setReadOnly(False)
             self.submission_controller.set_current_question(None)
             show_all_criteria(self)
-            self._sync_submission_context(load_persisted=True)
+            if self.student_records and self.rubric_data:
+                if not (0 <= self.current_student_index < len(self.student_records)):
+                    self.current_student_index = 0
+                self._populate_student_combo()
+                self.load_student_mode_student(self.current_student_index)
+            else:
+                self._sync_submission_context(load_persisted=True)
 
-        self.question_mode_controls.updateGeometry()
+        self._update_student_navigation_visibility()
         self.workflow_card.updateGeometry()
         central_layout = self.centralWidget().layout() if self.centralWidget() else None
         if central_layout is not None:
             central_layout.invalidate()
             central_layout.activate()
-
-        if self.workflow_mode == QUESTION_CENTRIC:
-            QTimer.singleShot(0, self._stabilize_question_mode_layout)
+        QTimer.singleShot(0, self._stabilize_question_mode_layout)
 
     def _stabilize_question_mode_layout(self):
-        """Honor the real size hints after hidden controls become visible."""
-        if self.workflow_mode != QUESTION_CENTRIC:
-            return
+        """Remeasure the compact workflow card after mode-specific controls change."""
         self.question_mode_controls.adjustSize()
-        controls_needed = max(92, self.question_mode_controls.sizeHint().height())
-        self.question_mode_controls.setMinimumHeight(controls_needed)
+        self.student_navigation_controls.adjustSize()
         self.workflow_card.adjustSize()
-        self.workflow_card.setMinimumHeight(max(206, self.workflow_card.sizeHint().height()))
+        self.workflow_card.setMinimumHeight(self.workflow_card.sizeHint().height())
         self.workflow_card.updateGeometry()
 
     def load_assessment_folder(self):
@@ -2419,7 +2542,7 @@ class RubricGrader(QMainWindow):
 
         try:
             self.assessments_dir = os.path.abspath(directory)
-            self.assessment_folder_label.setText(self.assessments_dir)
+            self._set_assessment_workspace_path(self.assessments_dir)
             self._configure_submission_evidence_root()
             self._load_persisted_reference_solution()
             assessment_records = load_students_from_assessment_dir(self.assessments_dir)
@@ -2445,12 +2568,15 @@ class RubricGrader(QMainWindow):
             self._populate_student_combo()
             if self.workflow_mode == QUESTION_CENTRIC and self.student_records:
                 self.load_question_mode_student(self.current_student_index)
+            elif self.workflow_mode == STUDENT_CENTRIC and self.student_records and self.rubric_data:
+                self.load_student_mode_student(self.current_student_index)
             else:
                 if self.student_records:
                     self._sync_student_centric_record_context(load_persisted=True)
                 else:
                     self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
+            self._update_student_navigation_visibility()
             self._maybe_offer_resume_grading_session()
         except Exception as e:
             QMessageBox.critical(self, "Assessment Folder Error", str(e))
@@ -2486,12 +2612,15 @@ class RubricGrader(QMainWindow):
             )
             if self.workflow_mode == QUESTION_CENTRIC and self.student_records:
                 self.load_question_mode_student(self.current_student_index)
+            elif self.workflow_mode == STUDENT_CENTRIC and self.student_records and self.rubric_data:
+                self.load_student_mode_student(self.current_student_index)
             else:
                 if self.student_records:
                     self._sync_student_centric_record_context(load_persisted=True)
                 else:
                     self._sync_submission_context(load_persisted=True)
                 self.update_question_progress_display()
+            self._update_student_navigation_visibility()
             self._maybe_offer_resume_grading_session()
         except Exception as e:
             QMessageBox.critical(self, "Roster Error", f"Failed to load roster: {str(e)}")
@@ -2522,6 +2651,75 @@ class RubricGrader(QMainWindow):
         finally:
             self._changing_student_combo = False
         self._update_student_navigation_buttons()
+        self._update_student_navigation_visibility()
+
+    def _update_student_navigation_visibility(self):
+        has_records = bool(self.student_records)
+        if hasattr(self, "student_combo"):
+            self.student_combo.setVisible(has_records)
+        if hasattr(self, "prev_student_btn"):
+            self.prev_student_btn.setVisible(has_records)
+        if hasattr(self, "next_student_btn"):
+            self.next_student_btn.setVisible(has_records)
+        if hasattr(self, "student_position_label"):
+            self.student_position_label.setVisible(has_records)
+        if hasattr(self, "student_name_edit"):
+            self.student_name_edit.setVisible(not has_records)
+            self.student_name_edit.setReadOnly(False)
+        if hasattr(self, "question_mode_actions"):
+            self.question_mode_actions.setVisible(self.workflow_mode == QUESTION_CENTRIC)
+        if hasattr(self, "student_mode_actions"):
+            self.student_mode_actions.setVisible(self.workflow_mode == STUDENT_CENTRIC)
+        self._update_student_navigation_buttons()
+
+    def load_student_mode_student(self, index=None):
+        """Load the complete saved state/evidence for one roster student."""
+        if not self.rubric_data:
+            return False
+        if index is not None:
+            if not (0 <= index < len(self.student_records)):
+                return False
+            self.current_student_index = index
+
+        record = self._current_student_record()
+        if record is None:
+            return False
+        if self.assessments_dir and not record.assessment_path:
+            record.assessment_path = assessment_path_for_student(record, self.assessments_dir)
+
+        try:
+            existing = self._read_assessment_file(record.assessment_path)
+            if existing is None:
+                existing = self._blank_assessment_for_record(record)
+                existing.pop("selected_questions", None)
+                is_blank = True
+            else:
+                is_blank = False
+
+            self._apply_assessment_to_widgets(
+                existing, blank_defaults_to_all_selected=is_blank
+            )
+            self.student_name_edit.setText(record.student_name)
+            self.current_assessment_path = record.assessment_path
+            self.student_mode_dirty = False
+            self.submission_controller.set_current_question(None)
+            show_all_criteria(self)
+            self._sync_submission_context(existing, load_persisted=True)
+
+            self._changing_student_combo = True
+            try:
+                if self.student_combo.currentIndex() != self.current_student_index:
+                    self.student_combo.setCurrentIndex(self.current_student_index)
+            finally:
+                self._changing_student_combo = False
+
+            self._update_student_navigation_buttons()
+            self.status_bar.set_status(f"Student mode: {record.student_name}")
+            update_total_points(self)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Load Student Error", f"Failed to load student assessment: {str(e)}")
+            return False
 
     def _current_student_record(self):
         if 0 <= self.current_student_index < len(self.student_records):
@@ -2537,7 +2735,7 @@ class RubricGrader(QMainWindow):
             parent = os.path.dirname(os.path.abspath(record.assessment_path))
             if os.path.isdir(parent):
                 self.assessments_dir = parent
-                self.assessment_folder_label.setText(parent)
+                self._set_assessment_workspace_path(parent)
                 self._configure_submission_evidence_root()
                 self._load_persisted_reference_solution()
                 return True
@@ -2555,7 +2753,7 @@ class RubricGrader(QMainWindow):
             return False
 
         self.assessments_dir = os.path.abspath(directory)
-        self.assessment_folder_label.setText(self.assessments_dir)
+        self._set_assessment_workspace_path(self.assessments_dir)
         self._configure_submission_evidence_root()
         self._load_persisted_reference_solution()
         for record in self.student_records:
@@ -2856,6 +3054,14 @@ class RubricGrader(QMainWindow):
             return
         self._move_student_after_save(1)
 
+    def save_and_next_student_assessment(self):
+        """Save the full student assessment and advance in Student-by-student mode."""
+        if self.workflow_mode != STUDENT_CENTRIC:
+            return
+        if not self.save_assessment(show_success=False):
+            return
+        self._move_student_after_save(1)
+
     # ------------------------------------------------------------------
     # Navigation / dirty-state handling
     # ------------------------------------------------------------------
@@ -2899,13 +3105,21 @@ class RubricGrader(QMainWindow):
             return False
 
     def on_student_combo_changed(self, new_index):
-        if self._changing_student_combo or self.workflow_mode != QUESTION_CENTRIC:
+        if self._changing_student_combo or not self.student_records:
             return
         if new_index < 0 or new_index == self.current_student_index:
             return
 
         old_index = self.current_student_index
-        if self.question_mode_dirty and not self.save_current_question(show_success=False):
+        if self.workflow_mode == QUESTION_CENTRIC:
+            if self.question_mode_dirty and not self.save_current_question(show_success=False):
+                self._changing_student_combo = True
+                try:
+                    self.student_combo.setCurrentIndex(old_index)
+                finally:
+                    self._changing_student_combo = False
+                return
+        elif self.student_mode_dirty and not self.save_assessment(show_success=False):
             self._changing_student_combo = True
             try:
                 self.student_combo.setCurrentIndex(old_index)
@@ -2914,21 +3128,31 @@ class RubricGrader(QMainWindow):
             return
 
         self.current_student_index = new_index
-        if self.load_question_mode_student(new_index):
-            self._write_grading_session_checkpoint()
+        if self.workflow_mode == QUESTION_CENTRIC:
+            if self.load_question_mode_student(new_index):
+                self._write_grading_session_checkpoint()
+        else:
+            self.load_student_mode_student(new_index)
 
     def navigate_student(self, delta):
-        if self.workflow_mode != QUESTION_CENTRIC or not self.student_records:
+        if not self.student_records:
             return
         target = self.current_student_index + delta
         if target < 0 or target >= len(self.student_records):
             return
 
-        if self.question_mode_dirty and not self.save_current_question(show_success=False):
+        if self.workflow_mode == QUESTION_CENTRIC:
+            if self.question_mode_dirty and not self.save_current_question(show_success=False):
+                return
+        elif self.student_mode_dirty and not self.save_assessment(show_success=False):
             return
+
         self.current_student_index = target
-        if self.load_question_mode_student(target):
-            self._write_grading_session_checkpoint()
+        if self.workflow_mode == QUESTION_CENTRIC:
+            if self.load_question_mode_student(target):
+                self._write_grading_session_checkpoint()
+        else:
+            self.load_student_mode_student(target)
 
     def _move_student_after_save(self, delta):
         if not self.student_records:
@@ -2936,8 +3160,11 @@ class RubricGrader(QMainWindow):
         target = self.current_student_index + delta
         if 0 <= target < len(self.student_records):
             self.current_student_index = target
-            if self.load_question_mode_student(target):
-                self._write_grading_session_checkpoint()
+            if self.workflow_mode == QUESTION_CENTRIC:
+                if self.load_question_mode_student(target):
+                    self._write_grading_session_checkpoint()
+            else:
+                self.load_student_mode_student(target)
         else:
             self.status_bar.show_temporary_message("Reached the end of the student list")
 
@@ -3009,11 +3236,21 @@ class RubricGrader(QMainWindow):
 
     def _update_student_navigation_buttons(self):
         count = len(self.student_records)
-        self.prev_student_btn.setEnabled(count > 0 and self.current_student_index > 0)
-        self.next_student_btn.setEnabled(
-            count > 0 and 0 <= self.current_student_index < count - 1
-        )
-        self.save_next_student_btn.setEnabled(count > 0)
+        valid = count > 0 and 0 <= self.current_student_index < count
+        has_prev = valid and self.current_student_index > 0
+        has_next = valid and self.current_student_index < count - 1
+        if hasattr(self, "prev_student_btn"):
+            self.prev_student_btn.setEnabled(has_prev)
+        if hasattr(self, "next_student_btn"):
+            self.next_student_btn.setEnabled(has_next)
+        if hasattr(self, "save_next_student_btn"):
+            self.save_next_student_btn.setEnabled(has_next)
+        if hasattr(self, "save_next_assessment_btn"):
+            self.save_next_assessment_btn.setEnabled(has_next)
+        if hasattr(self, "student_position_label"):
+            self.student_position_label.setText(
+                f"{self.current_student_index + 1} of {count}" if valid else "No roster"
+            )
 
     def _update_question_navigation_buttons(self):
         count = self.question_combo.count() if hasattr(self, "question_combo") else 0
@@ -3149,6 +3386,7 @@ class RubricGrader(QMainWindow):
                 checkbox.setChecked(True)
         update_total_points(self)
         self.current_assessment_path = None
+        self.student_mode_dirty = False
         self.submission_controller.deactivate_student()
         self.current_submission = None
         self._notify_submission_context_changed()
@@ -3164,22 +3402,22 @@ class RubricGrader(QMainWindow):
         if not self.criterion_widgets:
             QMessageBox.warning(self, "Warning", "No rubric loaded to save.")
             return None
-        assessment_data = get_assessment_data(
-            self, validate=(self.workflow_mode != QUESTION_CENTRIC)
-        )
+        # Saving is a persistence operation, not final-submission validation.
+        # Both workflows must be able to save incomplete in-progress grading.
+        assessment_data = get_assessment_data(self, validate=False)
         if not assessment_data:
             return None
         assessment_data = self._merge_current_submission_into_assessment(assessment_data)
-        if self.workflow_mode == QUESTION_CENTRIC:
-            record = self._current_student_record()
-            if record is not None:
-                assessment_data["student_name"] = record.student_name
-                assessment_data["student_id"] = record.student_id
-                assessment_data = update_grading_progress_metadata(
-                    assessment_data, mode=QUESTION_CENTRIC,
-                    question_id=self.current_question_id, student_id=record.student_id,
-                    question_complete=None,
-                )
+        record = self._current_student_record()
+        if record is not None:
+            assessment_data["student_name"] = record.student_name
+            assessment_data["student_id"] = record.student_id
+        if self.workflow_mode == QUESTION_CENTRIC and record is not None:
+            assessment_data = update_grading_progress_metadata(
+                assessment_data, mode=QUESTION_CENTRIC,
+                question_id=self.current_question_id, student_id=record.student_id,
+                question_complete=None,
+            )
         return assessment_data
 
     def _current_assessment_save_path(self):
@@ -3210,6 +3448,8 @@ class RubricGrader(QMainWindow):
             if self.workflow_mode == QUESTION_CENTRIC:
                 self.question_mode_dirty = False
                 self._write_grading_session_checkpoint()
+            else:
+                self.student_mode_dirty = False
             self.update_question_progress_display()
             self.status_bar.set_status(f"Saved to: {os.path.basename(file_path)}")
             self.status_bar.show_temporary_message("Assessment saved successfully")
@@ -3220,17 +3460,19 @@ class RubricGrader(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save assessment: {str(e)}")
             return False
 
-    def save_assessment(self):
+    def save_assessment(self, show_success=True):
         """Save the complete current student's assessment in either workflow mode."""
         assessment_data = self._build_complete_current_assessment()
         if assessment_data is None:
             return False
         target_path = self._current_assessment_save_path()
         if not target_path:
-            return self.save_assessment_as(assessment_data=assessment_data)
-        return self._write_complete_assessment(target_path, assessment_data, show_success=True)
+            return self.save_assessment_as(assessment_data=assessment_data, show_success=show_success)
+        return self._write_complete_assessment(
+            target_path, assessment_data, show_success=show_success
+        )
 
-    def save_assessment_as(self, assessment_data=None):
+    def save_assessment_as(self, assessment_data=None, show_success=True):
         """Save the complete current student's assessment to a chosen path."""
         if assessment_data is None:
             assessment_data = self._build_complete_current_assessment()
@@ -3250,7 +3492,9 @@ class RubricGrader(QMainWindow):
         )
         if not file_path:
             return False
-        return self._write_complete_assessment(file_path, assessment_data, show_success=True)
+        return self._write_complete_assessment(
+            file_path, assessment_data, show_success=show_success
+        )
 
     def load_assessment(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -3300,6 +3544,7 @@ class RubricGrader(QMainWindow):
 
             unmatched = self._apply_assessment_to_widgets(assessment_data)
             self.current_assessment_path = file_path
+            self.student_mode_dirty = False
 
             # Saved submission metadata is optional and independent of scoring.
             # Configure the normal sibling evidence root, then prefer any exact
@@ -3312,7 +3557,7 @@ class RubricGrader(QMainWindow):
 
             if self.workflow_mode == QUESTION_CENTRIC:
                 self.assessments_dir = self.assessments_dir or os.path.dirname(os.path.abspath(file_path))
-                self.assessment_folder_label.setText(self.assessments_dir)
+                self._set_assessment_workspace_path(self.assessments_dir)
                 self._configure_submission_evidence_root()
                 student_id = str(
                     assessment_data.get("student_id")
@@ -3387,6 +3632,24 @@ class RubricGrader(QMainWindow):
                 event.ignore()
                 return
             if reply == QMessageBox.Save and not self.save_current_question(show_success=False):
+                event.ignore()
+                return
+            self._finalize_window_close()
+            event.accept()
+            return
+
+        if self.workflow_mode == STUDENT_CENTRIC and self.student_mode_dirty:
+            reply = QMessageBox.question(
+                self,
+                "Save Before Closing",
+                "The current student's assessment has unsaved changes. Save before closing?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save,
+            )
+            if reply == QMessageBox.Cancel:
+                event.ignore()
+                return
+            if reply == QMessageBox.Save and not self.save_assessment(show_success=False):
                 event.ignore()
                 return
             self._finalize_window_close()

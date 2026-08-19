@@ -45,7 +45,7 @@ class TestMainWindowLayoutState(unittest.TestCase):
         self.assertIn("self.session_workspace_splitter.addWidget(self.workspace_host)", source)
         self.assertIn("self.session_workspace_splitter.setChildrenCollapsible(False)", source)
         self.assertIn("self.session_workspace_splitter.setHandleWidth(12)", source)
-        self.assertIn("self.session_workspace_splitter.setSizes([235, 665])", source)
+        self.assertIn("self.session_workspace_splitter.setSizes([185, 715])", source)
 
     def test_upper_context_is_scrollable_when_compressed(self):
         source = _segment("init_ui")
@@ -139,13 +139,13 @@ class TestMainWindowLayoutState(unittest.TestCase):
         close = _segment("closeEvent")
         self.assertIn("_finalize_window_close", close)
 
-    def test_question_mode_navigation_uses_two_row_layout(self):
+    def test_question_mode_navigation_uses_compact_question_row_and_shared_student_row(self):
         source = _segment("init_ui")
         self.assertIn("question_row = QHBoxLayout()", source)
-        self.assertIn("student_row = QHBoxLayout()", source)
-        self.assertIn("question_mode_controls.setMinimumHeight(92)", source)
+        self.assertIn("self.student_navigation_controls = QWidget()", source)
+        self.assertIn("student_row = QHBoxLayout(self.student_navigation_controls)", source)
+        self.assertIn("question_actions_layout.addWidget(self.save_question_btn)", source)
         self.assertNotIn("question_mode_layout.addLayout(action_row)", source)
-        self.assertIn("student_row.addWidget(self.save_question_btn)", source)
 
     def test_question_mode_layout_is_remeasured_after_becoming_visible(self):
         source = _segment("apply_current_workflow_view")
@@ -156,24 +156,30 @@ class TestMainWindowLayoutState(unittest.TestCase):
 
     def test_restored_bad_splitter_sizes_are_normalized_for_both_axes(self):
         ensure = _segment("_ensure_usable_splitter_sizes")
-        self.assertIn("minimums=(140, 320)", ensure)
-        self.assertIn("fallback=(235, 665)", ensure)
+        self.assertIn("minimums=(120, 320)", ensure)
+        self.assertIn("fallback=(185, 715)", ensure)
         self.assertIn("minimums=(460, 420)", ensure)
         self.assertIn("fallback=(760, 640)", ensure)
 
-    def test_primary_toolbar_groups_reports_and_settings_in_menus(self):
+    def test_primary_toolbar_keeps_routine_actions_visible_and_groups_secondary_actions(self):
         source = _segment("init_ui")
+        self.assertIn('QPushButton("Load Rubric")', source)
+        self.assertIn('QPushButton("Import Submissions")', source)
+        self.assertIn("self.setup_menu_button", source)
         self.assertIn("self.reports_menu_button", source)
+        self.assertIn("self.tools_menu_button", source)
         self.assertIn("self.settings_menu_button", source)
         self.assertIn("QToolButton.InstantPopup", source)
         self.assertIn("Submission & AI Settings", source)
+        self.assertNotIn('QPushButton("Load Reference Solution")', source)
+        self.assertNotIn('QPushButton("Grades + Evidence Folder")', source)
 
-    def test_grading_summary_is_collapsible_and_collapsed_by_default(self):
+    def test_grading_summary_is_compact_inside_grading_context(self):
         source = _segment("init_ui")
-        self.assertIn(
-            'CardWidget("Grading", collapsible=True, initially_collapsed=True)',
-            source,
-        )
+        self.assertIn("self.config_info = QLabel()", source)
+        self.assertIn('self.config_info.setObjectName("gradingSummaryLabel")', source)
+        self.assertIn("workflow_top.addWidget(self.config_info, 1)", source)
+        self.assertNotIn('CardWidget("Grading", collapsible=True', source)
 
     def test_focus_mode_temporarily_hides_context_and_right_grading_pane(self):
         source = _segment("_on_submission_focus_requested")
