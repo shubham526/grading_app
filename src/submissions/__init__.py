@@ -61,6 +61,18 @@ from .matcher import (
     normalize_student_id,
     record_from_latex_file,
 )
+from .migration import (
+    LEGACY_MIGRATION_SCHEMA_VERSION,
+    MIGRATION_STATUS_CANONICAL_ALREADY_PRESENT,
+    MIGRATION_STATUS_CREATED,
+    MIGRATION_STATUS_EXISTING,
+    LegacyEvidenceUnsupportedError,
+    LegacyEvidenceVerificationError,
+    LegacyMigrationResult,
+    LegacySubmissionMigrationError,
+    ensure_canonical_submission,
+    migrate_legacy_submission,
+)
 from .models import (
     CompilationResult,
     ParsedSubmission,
@@ -145,6 +157,7 @@ from .reference_solution import (
     reference_solution_root,
 )
 from .storage import (
+    CANONICAL_LINK_SCHEMA_VERSION,
     EVIDENCE_SCHEMA_VERSION,
     EXTRACTED_ANSWERS_FILENAME,
     EvidenceStoragePaths,
@@ -159,6 +172,7 @@ from .storage import (
     evidence_storage_paths,
     load_cached_transcription,
     load_persisted_submission,
+    persist_canonical_submission_linkage,
     persist_submission_evidence,
     save_transcription_cache,
     transcription_cache_key,
@@ -188,6 +202,15 @@ from .transcription import (
 
 
 __all__ = [
+    "CANONICAL_LINK_SCHEMA_VERSION",
+    "LEGACY_MIGRATION_SCHEMA_VERSION",
+    "MIGRATION_STATUS_CANONICAL_ALREADY_PRESENT",
+    "MIGRATION_STATUS_CREATED",
+    "MIGRATION_STATUS_EXISTING",
+    "LegacyEvidenceUnsupportedError",
+    "LegacyEvidenceVerificationError",
+    "LegacyMigrationResult",
+    "LegacySubmissionMigrationError",
     "ALLOWED_ENGINES",
     "CanonicalArtifactVerificationError",
     "CanonicalSubmissionBridgeError",
@@ -299,6 +322,8 @@ __all__ = [
     "generate_submission_id",
     "load_cached_transcription",
     "load_persisted_submission",
+    "ensure_canonical_submission",
+    "migrate_legacy_submission",
     "load_reference_solution",
     "match_student_directory",
     "normalize_heading_question_id",
@@ -310,6 +335,7 @@ __all__ = [
     "parse_submission_record",
     "parse_submissions_folder",
     "route_submission",
+    "persist_canonical_submission_linkage",
     "persist_submission_evidence",
     "prepare_reference_solution",
     "record_from_latex_file",

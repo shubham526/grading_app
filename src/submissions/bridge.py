@@ -23,6 +23,7 @@ from .models import (
 from .parser import parse_pdf_accommodation, parse_submission_record
 from .pdf import DEFAULT_MIN_TEXT_CHARS_PER_PAGE, DEFAULT_RENDER_DPI
 from .repository import SubmissionRepository
+from .storage import persist_canonical_submission_linkage
 from .routing import (
     HANDLER_LEGACY_LATEX,
     HANDLER_PDF_ACCOMMODATION,
@@ -264,6 +265,14 @@ def parse_canonical_submission(
         route,
     )
     parsed.metadata["canonical_verification"] = deepcopy(verification)
+
+    if evidence_dir is not None:
+        # The underlying v2.2 parser persists evidence before this bridge adds
+        # canonical identity.  Patch only the persisted metadata linkage so a
+        # later load_persisted_submission() can recover submission_id/attempt
+        # without re-running parsing or modifying original evidence bytes.
+        persist_canonical_submission_linkage(parsed, evidence_dir)
+
     return parsed
 
 

@@ -39,6 +39,7 @@ from .transcription import TranscriptionBackend, TranscriptionBatchResult
 
 EVIDENCE_SCHEMA_VERSION = "1.0"
 TRANSCRIPTION_CACHE_SCHEMA_VERSION = "1.0"
+CANONICAL_LINK_SCHEMA_VERSION = "1.0"
 
 SUBMISSION_META_FILENAME = "submission_meta.json"
 EXTRACTED_ANSWERS_FILENAME = "extracted_answers.json"
@@ -767,6 +768,83 @@ def load_cached_transcription(
     }
 
 
+
+def _canonical_submission_link(parsed: ParsedSubmission) -> Dict[str, Any]:
+    """Return a portable canonical-link summary from parsed metadata."""
+    value = parsed.metadata.get("canonical_submission", {})
+    if not isinstance(value, dict) or not value.get("submission_id"):
+        return {}
+
+    link = {
+        "schema_version": CANONICAL_LINK_SCHEMA_VERSION,
+        "submission_id": value.get("submission_id"),
+        "assessment_id": value.get("assessment_id"),
+        "student_id": value.get("student_id") or parsed.student_id,
+        "attempt": value.get("attempt"),
+        "source_system": value.get("source_system"),
+        "submitted_at": value.get("submitted_at"),
+        "imported_at": value.get("imported_at"),
+        "status": value.get("status"),
+        "route": value.get("route"),
+        "handler": value.get("handler"),
+        "artifact_ids": list(value.get("artifact_ids") or []),
+    }
+
+    # Omit unset optional values but preserve attempt=0 only for defensive
+    # diagnostics; valid canonical attempts are positive or None.
+    return {
+        key: deepcopy(item)
+        for key, item in link.items()
+        if item is not None
+    }
+
+
+def persist_canonical_submission_linkage(
+    parsed: ParsedSubmission,
+    storage_root: str,
+) -> Dict[str, Any]:
+    """Persist canonical identity into an existing v2.2 evidence manifest.
+
+    This function updates only the metadata object inside ``submission_meta.json``.
+    It does not rewrite original evidence bytes, extracted answers, raw text,
+    page renders, or transcription artifacts.
+    """
+    if not isinstance(parsed, ParsedSubmission):
+        raise TypeError("parsed must be ParsedSubmission")
+
+    link = _canonical_submission_link(parsed)
+    if not link:
+        raise ValueError(
+            "ParsedSubmission has no canonical_submission metadata to persist"
+        )
+
+    paths = evidence_storage_paths(storage_root, parsed.student_id, create=False)
+    meta_path = Path(paths.meta_path)
+    if not meta_path.exists():
+        raise FileNotFoundError(str(meta_path))
+
+    manifest = _read_json_object(meta_path)
+    schema = str(manifest.get("schema_version", ""))
+    if schema != EVIDENCE_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported evidence schema {schema!r}; expected "
+            f"{EVIDENCE_SCHEMA_VERSION!r}."
+        )
+
+    metadata = deepcopy(manifest.get("metadata", {}))
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["canonical_submission"] = deepcopy(link)
+    manifest["metadata"] = metadata
+
+    # A top-level copy is useful to tools that inspect the manifest without
+    # reconstructing ParsedSubmission.  The nested metadata copy remains the
+    # authoritative path used by load_persisted_submission().
+    manifest["canonical_submission"] = deepcopy(link)
+    _atomic_write_json(meta_path, manifest)
+    return link
+
+
 def assessment_submission_fields(parsed: ParsedSubmission) -> Dict[str, Any]:
     """Return the optional assessment-JSON fields for a loaded submission.
 
@@ -797,6 +875,23 @@ def assessment_submission_fields(parsed: ParsedSubmission) -> Dict[str, Any]:
     if evidence.get("student_dir"):
         submission_meta["evidence_dir"] = evidence.get("student_dir")
 
+    canonical_link = _canonical_submission_link(parsed)
+    if canonical_link:
+        submission_meta.update(
+            {
+                "submission_id": canonical_link.get("submission_id"),
+                "assessment_id": canonical_link.get("assessment_id"),
+                "attempt": canonical_link.get("attempt"),
+                "source_system": canonical_link.get("source_system"),
+                "artifact_ids": list(canonical_link.get("artifact_ids") or []),
+                "canonical_store": {
+                    "schema_version": canonical_link.get(
+                        "schema_version", CANONICAL_LINK_SCHEMA_VERSION
+                    )
+                },
+            }
+        )
+
     return {
         "submission_meta": submission_meta,
         "extracted_answers": dict(parsed.answers_by_question),
@@ -804,6 +899,7 @@ def assessment_submission_fields(parsed: ParsedSubmission) -> Dict[str, Any]:
 
 
 __all__ = [
+    "CANONICAL_LINK_SCHEMA_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
     "EXTRACTED_ANSWERS_FILENAME",
     "EvidenceStoragePaths",
@@ -818,6 +914,7 @@ __all__ = [
     "evidence_storage_paths",
     "load_cached_transcription",
     "load_persisted_submission",
+    "persist_canonical_submission_linkage",
     "persist_submission_evidence",
     "save_transcription_cache",
     "transcription_cache_key",
