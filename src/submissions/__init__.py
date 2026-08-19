@@ -40,6 +40,17 @@ from .domain import (
     generate_import_batch_id,
     generate_submission_id,
 )
+from .importer import (
+    DUPLICATE_STATUS_EXACT_ACTIVE,
+    DUPLICATE_STATUS_EXACT_HISTORICAL,
+    DUPLICATE_STATUS_EXISTING_NEW_ATTEMPT,
+    DUPLICATE_STATUS_IN_BATCH_EXACT,
+    DUPLICATE_STATUS_NONE,
+    DUPLICATE_STATUS_NOT_CHECKED,
+    DUPLICATE_STATUS_SAME_FILENAMES_CHANGED,
+    ImportCommitResult,
+    SubmissionImporter,
+)
 from .latex import (
     extract_text_from_tex,
     strip_latex_comment,
@@ -91,6 +102,12 @@ from .repository import (
     CanonicalStoragePaths,
     SubmissionRepository,
     canonical_storage_paths,
+)
+from .sources import (
+    LocalFileSourceAdapter,
+    SubmissionSourceAdapter,
+    discover_local_directory,
+    discover_local_files,
 )
 from .splitter import (
     FULL_SUBMISSION,
@@ -149,6 +166,19 @@ from .transcription import (
 
 __all__ = [
     "ALLOWED_ENGINES",
+    "DUPLICATE_STATUS_EXACT_ACTIVE",
+    "DUPLICATE_STATUS_EXACT_HISTORICAL",
+    "DUPLICATE_STATUS_EXISTING_NEW_ATTEMPT",
+    "DUPLICATE_STATUS_IN_BATCH_EXACT",
+    "DUPLICATE_STATUS_NONE",
+    "DUPLICATE_STATUS_NOT_CHECKED",
+    "DUPLICATE_STATUS_SAME_FILENAMES_CHANGED",
+    "ImportCommitResult",
+    "LocalFileSourceAdapter",
+    "SubmissionImporter",
+    "SubmissionSourceAdapter",
+    "discover_local_directory",
+    "discover_local_files",
     "CANONICAL_DIRNAME",
     "CANONICAL_REPOSITORY_SCHEMA_VERSION",
     "ArtifactFile",
