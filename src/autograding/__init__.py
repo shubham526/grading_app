@@ -1,8 +1,9 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-3 provide domain/configuration contracts, immutable instructor
-test-bundle storage, and a canonical-submission-to-execution-plan bridge.  They
-do **not** execute student code, import Docker/pytest, or depend on PyQt.
+v2.3.3 Commits 1-4 provide domain/configuration contracts, immutable instructor
+test-bundle storage, a canonical-submission-to-execution-plan bridge, and the
+isolated execution-backend abstraction.  Commit 4 still provides no production
+backend capable of executing student code and does not import Docker/pytest.
 """
 
 from .config import (
@@ -42,16 +43,36 @@ from .errors import (
     AutogradingBundleStorageError,
     AutogradingBundleValidationError,
     AutogradingError,
+    AutogradingExecutionError,
     AutogradingPlanningError,
     AutogradingSerializationError,
     AutogradingValidationError,
     CanonicalSubmissionIntegrityError,
+    ExecutionBackendContractError,
+    ExecutionBackendUnavailableError,
     ExecutionPlanValidationError,
+    ExecutionResultProtocolError,
+    HostExecutionDisabledError,
     NoCanonicalSubmissionError,
     ProgrammingSubmissionContractError,
     UnsupportedAutogradingLanguageError,
     UnsupportedAutogradingRunnerError,
     UnsupportedAutogradingSchemaError,
+)
+from .execution import (
+    ALLOWED_BACKEND_SECURITY_PROFILES,
+    BACKEND_EXECUTION_RECORD_SCHEMA_VERSION,
+    BACKEND_SECURITY_PROFILE_HOST,
+    BACKEND_SECURITY_PROFILE_ISOLATED,
+    BACKEND_SECURITY_PROFILE_TEST_FAKE,
+    BackendAvailability,
+    BackendExecutionRecord,
+    EXECUTION_AVAILABILITY_SCHEMA_VERSION,
+    ExecutionBackend,
+    NONTERMINAL_EXECUTION_STATUSES,
+    TERMINAL_EXECUTION_STATUSES,
+    probe_backends,
+    validate_execution_result,
 )
 from .ids import (
     generate_autograding_run_id,
@@ -100,7 +121,14 @@ from .models import __all__ as _model_all
 
 
 __all__ = list(_model_all) + [
+    "ALLOWED_BACKEND_SECURITY_PROFILES",
     "ALLOWED_TOP_LEVEL_ENTRIES",
+    "BACKEND_EXECUTION_RECORD_SCHEMA_VERSION",
+    "BACKEND_SECURITY_PROFILE_HOST",
+    "BACKEND_SECURITY_PROFILE_ISOLATED",
+    "BACKEND_SECURITY_PROFILE_TEST_FAKE",
+    "BackendAvailability",
+    "BackendExecutionRecord",
     "AUTOGRADER_CONFIG_FILENAME",
     "AUTOGRADING_DIRECTORY",
     "AutogradingBundleError",
@@ -135,16 +163,24 @@ __all__ = list(_model_all) + [
     "AUTOGRADING_CONFIG_SCHEMA_VERSION",
     "AutogradingConfig",
     "AutogradingError",
+    "AutogradingExecutionError",
     "AutogradingPlanningError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
+    "ExecutionBackend",
+    "ExecutionBackendContractError",
+    "ExecutionBackendUnavailableError",
     "ExecutionPlanValidationError",
+    "ExecutionResultProtocolError",
+    "EXECUTION_AVAILABILITY_SCHEMA_VERSION",
     "EXECUTION_PLAN_SCHEMA_VERSION",
     "EXECUTION_WORKSPACE_SCHEMA_VERSION",
     "ExecutionPlan",
     "ExecutionWorkspaceSpec",
     "GRADER_DIRECTORY",
+    "HostExecutionDisabledError",
+    "NONTERMINAL_EXECUTION_STATUSES",
     "NoCanonicalSubmissionError",
     "OUTPUT_DIRECTORY",
     "PROGRAMMING_PATH_METADATA_KEY",
@@ -155,10 +191,13 @@ __all__ = list(_model_all) + [
     "WORKSPACE_NAMESPACE_GRADER",
     "WORKSPACE_NAMESPACE_SUBMISSION",
     "WORKSPACE_NAMESPACES",
+    "TERMINAL_EXECUTION_STATUSES",
     "build_execution_plan",
     "build_execution_plan_from_bundle",
     "normalize_workspace_relative_path",
+    "probe_backends",
     "select_programming_submission",
+    "validate_execution_result",
     "DEFAULT_REPORTING_POLICY",
     "SCORING_METHOD_EQUAL_WITHIN_GROUP",
     "SCORING_METHOD_EXPLICIT_TEST_POINTS",

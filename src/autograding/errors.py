@@ -57,6 +57,26 @@ class ExecutionPlanValidationError(AutogradingPlanningError):
     """Raised when a transient execution plan/workspace contract is inconsistent."""
 
 
+class AutogradingExecutionError(AutogradingError):
+    """Base class for execution-backend contract/runtime failures."""
+
+
+class ExecutionBackendContractError(AutogradingExecutionError, ValueError):
+    """Raised when an execution backend violates the stable backend contract."""
+
+
+class ExecutionBackendUnavailableError(AutogradingExecutionError):
+    """Raised when no requested isolated execution backend is currently available."""
+
+
+class HostExecutionDisabledError(AutogradingExecutionError):
+    """Raised when a backend attempts to use direct host execution for student code."""
+
+
+class ExecutionResultProtocolError(AutogradingExecutionError, ValueError):
+    """Raised when backend output violates the normalized execution-result protocol."""
+
+
 class AutogradingBundleError(AutogradingError):
     """Base class for instructor test-bundle ingestion/storage failures."""
 
@@ -75,6 +95,7 @@ class AutogradingBundleStorageError(AutogradingBundleError):
 
 __all__ = [
     "AutogradingBundleError",
+    "AutogradingExecutionError",
     "AutogradingBundleIntegrityError",
     "AutogradingBundleSelectionError",
     "AutogradingBundleStorageError",
@@ -84,7 +105,11 @@ __all__ = [
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
+    "ExecutionBackendContractError",
+    "ExecutionBackendUnavailableError",
     "ExecutionPlanValidationError",
+    "ExecutionResultProtocolError",
+    "HostExecutionDisabledError",
     "NoCanonicalSubmissionError",
     "ProgrammingSubmissionContractError",
     "UnsupportedAutogradingLanguageError",
