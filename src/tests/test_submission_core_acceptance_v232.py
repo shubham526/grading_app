@@ -265,7 +265,8 @@ class TestSubmissionCoreAcceptanceV232(unittest.TestCase):
 
             route = route_submission(submission)
             self.assertEqual(route.route, ROUTE_LATEX_PROJECT)
-            self.assertFalse(route.supported)
+            self.assertTrue(route.supported)
+            self.assertEqual(route.metadata["handler_available_since"], "2.3.4.2")
 
             submission_dir = Path(repository.submission_directory(submission))
             originals = [

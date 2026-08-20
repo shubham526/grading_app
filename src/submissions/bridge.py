@@ -14,7 +14,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Optional, Sequence
 
-from .domain import ARTIFACT_TYPE_PDF, ARTIFACT_TYPE_TEX, Submission
+from .domain import (
+    ARTIFACT_TYPE_LATEX_PROJECT_ZIP,
+    ARTIFACT_TYPE_PDF,
+    ARTIFACT_TYPE_TEX,
+    ARTIFACT_TYPE_ZIP,
+    Submission,
+)
 from .models import (
     ParsedSubmission,
     SUBMISSION_MODE_LATEX,
@@ -23,8 +29,13 @@ from .models import (
 from .parser import parse_pdf_accommodation, parse_submission_record
 from .pdf import DEFAULT_MIN_TEXT_CHARS_PER_PAGE, DEFAULT_RENDER_DPI
 from .repository import SubmissionRepository
+from .latex_project import (
+    LatexProjectIngestionConfig,
+    parse_canonical_latex_project,
+)
 from .storage import persist_canonical_submission_linkage
 from .routing import (
+    HANDLER_LATEX_PROJECT,
     HANDLER_LEGACY_LATEX,
     HANDLER_PDF_ACCOMMODATION,
     RouteDecision,
@@ -122,6 +133,8 @@ def parse_canonical_submission(
     compile_pdf: bool = True,
     compilation_dir: Optional[str] = None,
     compiler_options: Optional[Dict[str, Any]] = None,
+    latex_project_root: Optional[str] = None,
+    latex_project_config: Optional[LatexProjectIngestionConfig] = None,
     accommodation_mode: bool = False,
     render_dir: Optional[str] = None,
     render_dpi: int = DEFAULT_RENDER_DPI,
@@ -137,8 +150,8 @@ def parse_canonical_submission(
 
     The canonical repository remains authoritative for original artifact bytes.
     ``evidence_dir`` is retained for compatibility with the existing v2.2
-    parsed-evidence store; Commit 5 will add the persistence/migration linkage
-    between those layers.
+    parsed-evidence store. Canonical identity/linkage remains attached after
+    the selected handler returns its grading-facing ``ParsedSubmission``.
     """
     if not isinstance(submission, Submission):
         raise TypeError("submission must be Submission")
@@ -222,6 +235,40 @@ def parse_canonical_submission(
             evidence_dir=evidence_dir,
         )
 
+    elif route.handler == HANDLER_LATEX_PROJECT:
+        if not compile_pdf:
+            raise CanonicalSubmissionBridgeError(
+                "LaTeX-project Written parsing requires compile_pdf=True so "
+                "the project can produce the visual grading PDF."
+            )
+
+        zip_artifacts = [
+            artifact
+            for artifact in submission.artifacts
+            if artifact.artifact_type
+            in {ARTIFACT_TYPE_ZIP, ARTIFACT_TYPE_LATEX_PROJECT_ZIP}
+        ]
+        if len(zip_artifacts) != 1:
+            raise CanonicalSubmissionBridgeError(
+                "LaTeX-project route requires exactly one canonical ZIP artifact"
+            )
+
+        pdf_artifact = _artifact_of_type(submission, ARTIFACT_TYPE_PDF)
+        parsed = parse_canonical_latex_project(
+            submission,
+            repository,
+            zip_artifacts[0],
+            question_ids,
+            reference_pdf_artifact=pdf_artifact,
+            root_relative_path=latex_project_root,
+            config=latex_project_config,
+            compilation_dir=compilation_dir,
+            compiler_options=compiler_options,
+            pdf_options=pdf_options,
+            min_text_chars_per_page=min_text_chars_per_page,
+            evidence_dir=evidence_dir,
+        )
+
     elif route.handler == HANDLER_PDF_ACCOMMODATION:
         if route.requires_explicit_accommodation and not accommodation_mode:
             raise ExplicitAccommodationRequiredError(
@@ -256,7 +303,7 @@ def parse_canonical_submission(
 
     else:
         raise SubmissionHandlerUnavailableError(
-            f"Handler {route.handler!r} is not installed in the v2.3.2 bridge"
+            f"Handler {route.handler!r} is not installed in the canonical bridge"
         )
 
     parsed.metadata = deepcopy(parsed.metadata)

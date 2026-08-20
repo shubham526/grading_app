@@ -1,9 +1,10 @@
 """Backend support for Overleaf / multi-file LaTeX project ingestion.
 
-v2.3.4.2 Commit 4 extends the existing restricted LaTeX-to-PDF compiler to
+v2.3.4.2 Commit 5 extends the existing restricted LaTeX-to-PDF compiler to
 whole safely extracted Overleaf projects. Project discovery/root resolution
-remain separate from compilation; canonical submission bridging and Written-
-mode ZIP import UI arrive in later commits.
+remain separate from compilation. Canonical submission bridging now adapts
+compiled projects into the existing Written ``ParsedSubmission`` contract;
+ZIP import UI arrives in a later commit.
 """
 
 from .archive import (
@@ -53,6 +54,16 @@ from .resolution import (
     resolve_latex_project_root,
     select_latex_project_root,
 )
+from .written_bridge import (
+    LATEX_PROJECT_COMPILED_DIRNAME,
+    LATEX_PROJECT_DERIVED_DIRNAME,
+    LatexProjectCompilationFailedError,
+    LatexProjectPreparedContext,
+    LatexProjectRootResolutionRequiredError,
+    LatexProjectWrittenBridgeError,
+    parse_canonical_latex_project,
+    prepare_canonical_latex_project,
+)
 from .storage import (
     ARCHIVE_METADATA_FILENAME,
     EXTRACTED_DIRNAME,
@@ -86,6 +97,12 @@ __all__ = list(_model_all) + [
     "LatexProjectArchiveRejectedError",
     "LatexProjectArchiveStore",
     "LatexProjectCompilation",
+    "LATEX_PROJECT_COMPILED_DIRNAME",
+    "LATEX_PROJECT_DERIVED_DIRNAME",
+    "LatexProjectCompilationFailedError",
+    "LatexProjectPreparedContext",
+    "LatexProjectRootResolutionRequiredError",
+    "LatexProjectWrittenBridgeError",
     "LatexProjectError",
     "LatexProjectIngestionConfig",
     "LatexProjectIntegrityError",
@@ -99,6 +116,8 @@ __all__ = list(_model_all) + [
     "StoredLatexProject",
     "UnsupportedLatexProjectSchemaError",
     "compile_stored_latex_project_to_pdf",
+    "parse_canonical_latex_project",
+    "prepare_canonical_latex_project",
     "compute_manifest_sha256",
     "discover_latex_project",
     "resolve_latex_project_root",

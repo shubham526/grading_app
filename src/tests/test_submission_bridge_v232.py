@@ -234,7 +234,7 @@ class TestSubmissionBridgeV232(unittest.TestCase):
                 self.repository,
             )
 
-    def test_pdf_plus_zip_is_recognized_but_waits_for_v234(self):
+    def test_pdf_plus_zip_is_recognized_by_installed_v2342_handler(self):
         pdf = self.root / "alice.pdf"
         zip_path = self.root / "alice.zip"
         pdf.write_bytes(b"rendered-reference")
@@ -244,15 +244,10 @@ class TestSubmissionBridgeV232(unittest.TestCase):
             _candidate(pdf, ARTIFACT_TYPE_PDF, ARTIFACT_ROLE_RENDERED),
         ])
 
-        self.assertEqual(
-            route_submission(submission).route,
-            ROUTE_LATEX_PROJECT,
-        )
-        with self.assertRaises(SubmissionHandlerUnavailableError):
-            parse_canonical_submission(
-                submission,
-                self.repository,
-            )
+        decision = route_submission(submission)
+        self.assertEqual(decision.route, ROUTE_LATEX_PROJECT)
+        self.assertTrue(decision.supported)
+        self.assertEqual(decision.metadata["handler_available_since"], "2.3.4.2")
 
     def test_bridge_can_skip_hash_verification_only_when_explicitly_requested(self):
         tex = self.root / "alice.tex"

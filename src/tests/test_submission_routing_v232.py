@@ -166,7 +166,7 @@ class TestSubmissionRoutingV232(unittest.TestCase):
         self.assertEqual(decision.metadata["handler_available_since"], "2.3.3")
         self.assertEqual(len(decision.artifact_ids), 2)
 
-    def test_pdf_plus_zip_routes_to_future_latex_project_handler(self):
+    def test_pdf_plus_zip_routes_to_latex_project_handler(self):
         decision = route_submission(
             _submission([
                 _artifact(
@@ -189,11 +189,9 @@ class TestSubmissionRoutingV232(unittest.TestCase):
         )
         self.assertEqual(decision.route, ROUTE_LATEX_PROJECT)
         self.assertEqual(decision.handler, HANDLER_LATEX_PROJECT)
-        self.assertFalse(decision.supported)
-        self.assertEqual(
-            decision.reason,
-            REASON_LATEX_PROJECT_HANDLER_PENDING,
-        )
+        self.assertTrue(decision.supported)
+        self.assertIsNone(decision.reason)
+        self.assertEqual(decision.metadata["handler_available_since"], "2.3.4.2")
 
     def test_multiple_tex_sources_are_not_silently_selected(self):
         decision = route_submission(

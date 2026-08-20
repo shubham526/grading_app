@@ -50,7 +50,8 @@ REASON_MULTIPLE_PDFS = "multiple_pdfs"
 REASON_MIXED_ARTIFACTS = "unsupported_mixed_artifacts"
 REASON_UNSUPPORTED_ARTIFACTS = "unsupported_artifacts"
 REASON_PROGRAMMING_HANDLER_PENDING = "handler_not_available_until_v2.3.3"  # legacy diagnostic constant
-REASON_LATEX_PROJECT_HANDLER_PENDING = "handler_not_available_until_v2.3.4"
+REASON_LATEX_PROJECT_HANDLER_PENDING = "handler_not_available_until_v2.3.4"  # legacy diagnostic constant
+REASON_MULTIPLE_LATEX_PROJECT_ARCHIVES = "multiple_latex_project_archives"
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,14 @@ def route_submission(submission: Submission) -> RouteDecision:
     # shape.  A ZIP alone is also routed there so the future project validator
     # can provide the correct missing-PDF/main.tex diagnostics.
     if project_zip and not tex and not python and not other:
+        if len(project_zip) != 1:
+            return _decision(
+                route=ROUTE_MIXED,
+                handler=HANDLER_NONE,
+                supported=False,
+                artifact_ids=tuple(a.artifact_id for a in artifacts),
+                reason=REASON_MULTIPLE_LATEX_PROJECT_ARCHIVES,
+            )
         if len(pdf) <= 1:
             selected = tuple(
                 a.artifact_id for a in project_zip + pdf
@@ -160,12 +169,13 @@ def route_submission(submission: Submission) -> RouteDecision:
             return _decision(
                 route=ROUTE_LATEX_PROJECT,
                 handler=HANDLER_LATEX_PROJECT,
-                supported=False,
+                supported=True,
                 artifact_ids=selected,
-                reason=REASON_LATEX_PROJECT_HANDLER_PENDING,
+                reason=None,
                 metadata={
                     "zip_count": len(project_zip),
                     "pdf_count": len(pdf),
+                    "handler_available_since": "2.3.4.2",
                 },
             )
         return _decision(
@@ -284,6 +294,7 @@ __all__ = [
     "HANDLER_PDF_ACCOMMODATION",
     "HANDLER_PROGRAMMING",
     "REASON_LATEX_PROJECT_HANDLER_PENDING",
+    "REASON_MULTIPLE_LATEX_PROJECT_ARCHIVES",
     "REASON_MIXED_ARTIFACTS",
     "REASON_MULTIPLE_LATEX_SOURCES",
     "REASON_MULTIPLE_PDFS",
