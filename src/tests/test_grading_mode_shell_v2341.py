@@ -1,4 +1,4 @@
-"""v2.3.4.1 Commit 1 integration tests for the MainWindow mode shell."""
+"""v2.3.4.1 integration tests for the MainWindow mode shell."""
 
 import os
 import unittest
@@ -14,6 +14,7 @@ else:
     _IMPORT_ERROR = None
     from src.ui.main_window import RubricGrader
     from src.ui.modes.grading_mode import GradingMode
+    from src.ui.workspaces import WrittenGradingWorkspace
 
 
 @unittest.skipIf(
@@ -47,12 +48,16 @@ class TestGradingModeShellV2341(unittest.TestCase):
 
     def test_written_mode_reuses_exact_existing_written_root(self):
         written_root = self.window._written_central_widget
+        written_workspace = self.window.written_workspace
         submission_workspace = self.window.submission_workspace
         workflow_combo = self.window.workflow_mode_combo
 
+        self.assertIsInstance(written_workspace, WrittenGradingWorkspace)
+        self.assertIs(written_workspace.legacy_root, written_root)
+
         self.window.set_grading_mode(GradingMode.WRITTEN)
 
-        self.assertIs(self.window.active_grading_workspace(), written_root)
+        self.assertIs(self.window.active_grading_workspace(), written_workspace)
         self.assertIs(self.window.current_grading_mode, GradingMode.WRITTEN)
         self.assertIs(self.window.submission_workspace, submission_workspace)
         self.assertIs(self.window.workflow_mode_combo, workflow_combo)
@@ -60,7 +65,8 @@ class TestGradingModeShellV2341(unittest.TestCase):
         self.window.show_grading_mode_selector()
         self.window.set_grading_mode(GradingMode.WRITTEN)
 
-        self.assertIs(self.window.active_grading_workspace(), written_root)
+        self.assertIs(self.window.active_grading_workspace(), written_workspace)
+        self.assertIs(written_workspace.legacy_root, written_root)
         self.assertIs(self.window.submission_workspace, submission_workspace)
         self.assertIs(self.window.workflow_mode_combo, workflow_combo)
 
@@ -76,7 +82,7 @@ class TestGradingModeShellV2341(unittest.TestCase):
         )
         self.assertIsNot(
             self.window.programming_workspace,
-            self.window._written_central_widget,
+            self.window.written_workspace,
         )
 
     def test_file_menu_exposes_switch_grading_mode(self):

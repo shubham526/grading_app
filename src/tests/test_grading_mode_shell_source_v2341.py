@@ -1,4 +1,4 @@
-"""Source-level guards for v2.3.4.1 Commit 1."""
+"""Source-level guards for the v2.3.4.1 grading-mode shell."""
 
 import ast
 from pathlib import Path
@@ -10,6 +10,7 @@ _MAIN_WINDOW = _ROOT / "ui" / "main_window.py"
 _PROGRAMMING_PLACEHOLDER = (
     _ROOT / "ui/workspaces/programming_grading_workspace.py"
 )
+_WRITTEN_WORKSPACE = _ROOT / "ui/workspaces/written_grading_workspace.py"
 
 
 class TestGradingModeShellSourceV2341(unittest.TestCase):
@@ -28,24 +29,23 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
         self.assertIn("QStackedWidget", source)
         self.assertIn("Switch Grading Mode…", source)
 
-    def test_commit1_programming_page_is_presentation_only(self):
+    def test_commit1_programming_page_is_still_presentation_only(self):
         source = _PROGRAMMING_PLACEHOLDER.read_text(encoding="utf-8")
         self.assertNotIn("DockerPytestExecutionBackend", source)
         self.assertNotIn("AutogradingService", source)
         self.assertNotIn("grade_submission", source)
         self.assertIn("Commit 3", source)
 
-    def test_final_v233_written_root_is_wrapped_not_rebuilt(self):
+    def test_final_v233_written_root_is_preserved_inside_written_workspace(self):
         source = _MAIN_WINDOW.read_text(encoding="utf-8")
+        self.assertIn("written_widget = self.takeCentralWidget()", source)
+        self.assertIn("self._written_central_widget = written_widget", source)
         self.assertIn(
-            "written_widget = self.takeCentralWidget()",
+            "self.written_workspace = WrittenGradingWorkspace(written_widget, self)",
             source,
         )
-        self.assertIn(
-            "self._written_central_widget = written_widget",
-            source,
-        )
-        self.assertIn(
+        self.assertIn("self._mode_stack.addWidget(self.written_workspace)", source)
+        self.assertNotIn(
             "self._mode_stack.addWidget(self._written_central_widget)",
             source,
         )
@@ -65,6 +65,7 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
             _ROOT / "ui/modes/grading_mode.py",
             _ROOT / "ui/modes/mode_selection_page.py",
             _PROGRAMMING_PLACEHOLDER,
+            _WRITTEN_WORKSPACE,
         ]
         for path in paths:
             ast.parse(

@@ -84,7 +84,10 @@ from src.ui.workers.autograding_worker import (
 )
 from src.ui.modes import GradingMode
 from src.ui.modes.mode_selection_page import ModeSelectionPage
-from src.ui.workspaces import ProgrammingGradingWorkspace
+from src.ui.workspaces import (
+    ProgrammingGradingWorkspace,
+    WrittenGradingWorkspace,
+)
 from src.ui.workers.submission_worker import (
     SubmissionOperation,
     SubmissionWorker,
@@ -219,7 +222,12 @@ class RubricGrader(QMainWindow):
         # startup/mode-selection page is visible. Assignment type is never
         # inferred from a file extension.
         self.current_grading_mode = None
+        # ``_written_central_widget`` remains as a compatibility alias to
+        # the exact pre-v2.3.4 written root. Commit 2 places that root
+        # behind ``WrittenGradingWorkspace`` without rebuilding its child
+        # controls or moving grading/session ownership out of this window.
         self._written_central_widget = None
+        self.written_workspace = None
         self._mode_stack = None
         self.mode_selection_page = None
         self.programming_workspace = None
@@ -945,8 +953,8 @@ class RubricGrader(QMainWindow):
         if written_widget is None:
             raise RuntimeError("Written grading UI was not constructed")
 
-        written_widget.setObjectName("writtenGradingWorkspaceLegacyRoot")
         self._written_central_widget = written_widget
+        self.written_workspace = WrittenGradingWorkspace(written_widget, self)
 
         self.mode_selection_page = ModeSelectionPage(self)
         self.programming_workspace = ProgrammingGradingWorkspace(self)
@@ -954,7 +962,7 @@ class RubricGrader(QMainWindow):
         self._mode_stack = QStackedWidget(self)
         self._mode_stack.setObjectName("gradingModeWorkspaceStack")
         self._mode_stack.addWidget(self.mode_selection_page)
-        self._mode_stack.addWidget(self._written_central_widget)
+        self._mode_stack.addWidget(self.written_workspace)
         self._mode_stack.addWidget(self.programming_workspace)
         self.setCentralWidget(self._mode_stack)
 
@@ -1007,7 +1015,7 @@ class RubricGrader(QMainWindow):
             raise RuntimeError("Grading mode shell is not initialized")
 
         if mode is GradingMode.WRITTEN:
-            target = self._written_central_widget
+            target = self.written_workspace
         else:
             target = self.programming_workspace
 
@@ -1032,8 +1040,10 @@ class RubricGrader(QMainWindow):
         return self._mode_stack.currentWidget()
 
     def _written_central_layout(self):
-        """Return the original v2.3.3 written root layout after shell wrapping."""
+        """Return the preserved written-root layout through its workspace boundary."""
 
+        if self.written_workspace is not None:
+            return self.written_workspace.legacy_layout()
         if self._written_central_widget is None:
             return None
         return self._written_central_widget.layout()
