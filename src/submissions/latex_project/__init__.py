@@ -1,7 +1,7 @@
 """Backend support for Overleaf / multi-file LaTeX project ingestion.
 
-v2.3.4.2 Commit 2 adds bounded, execution-free ZIP inspection/extraction and
-transactional immutable project storage.  Root-document discovery, multi-file
+v2.3.4.2 Commit 3 adds execution-free project discovery and deterministic
+root-document resolution on top of the safe archive/storage layer. Multi-file
 composition, canonical submission bridging, and Written-mode UI arrive in
 later commits.
 """
@@ -10,6 +10,12 @@ from .archive import (
     LatexArchiveExtractionSummary,
     compute_manifest_sha256,
     safe_extract_latex_project_zip,
+)
+from .discovery import (
+    LatexProjectDiscovery,
+    LatexProjectReference,
+    LatexTexSourceInfo,
+    discover_latex_project,
 )
 from .config import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -39,6 +45,10 @@ from .errors import (
 )
 from .models import *  # re-export stable domain constants/value objects
 from .models import __all__ as _model_all
+from .resolution import (
+    resolve_latex_project_root,
+    select_latex_project_root,
+)
 from .storage import (
     ARCHIVE_METADATA_FILENAME,
     EXTRACTED_DIRNAME,
@@ -64,6 +74,9 @@ __all__ = list(_model_all) + [
     "EXTRACTED_DIRNAME",
     "LATEX_PROJECT_CONFIG_SCHEMA_VERSION",
     "LatexArchiveExtractionSummary",
+    "LatexProjectDiscovery",
+    "LatexProjectReference",
+    "LatexTexSourceInfo",
     "LatexProjectArchiveError",
     "LatexProjectArchiveRejectedError",
     "LatexProjectArchiveStore",
@@ -80,6 +93,9 @@ __all__ = list(_model_all) + [
     "StoredLatexProject",
     "UnsupportedLatexProjectSchemaError",
     "compute_manifest_sha256",
+    "discover_latex_project",
+    "resolve_latex_project_root",
+    "select_latex_project_root",
     "load_latex_project_config",
     "safe_extract_latex_project_zip",
     "save_latex_project_config",
