@@ -249,6 +249,47 @@ class DockerCLI:
             architecture=str(item.get("Architecture") or "").strip() or None,
         )
 
+    def probe_python_module_version(
+        self,
+        image_reference: str,
+        module_name: str,
+        *,
+        interpreter: str = "python",
+    ) -> str:
+        image = str(image_reference or "").strip()
+        module = str(module_name or "").strip()
+        python = str(interpreter or "").strip()
+        if not all((image, module, python)):
+            raise ValueError("image/module/interpreter must not be empty")
+        code = (
+            "import importlib; "
+            "m=importlib.import_module(%r); "
+            "print(getattr(m, '__version__', 'unknown'))" % module
+        )
+        result = self._control(
+            (
+                "run", "--rm", "--pull=never", "--network", "none",
+                "--read-only", "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                "--user", "65534:65534",
+                "--env", "PYTHONDONTWRITEBYTECODE=1",
+                "--env", "PYTHONNOUSERSITE=1",
+                image, python, "-c", code,
+            ),
+            timeout_seconds=20.0,
+        )
+        if result.timed_out:
+            raise DockerCommandError("Docker runtime module probe timed out")
+        if result.returncode != 0:
+            raise DockerCommandError(
+                "Docker runtime image %r cannot import %s: %s"
+                % (image, module, result.stderr.strip() or "module probe failed")
+            )
+        value = result.stdout.strip()
+        if not value:
+            raise DockerCommandError("Docker runtime module probe returned no version")
+        return value
+
     def create(self, args: Sequence[str]) -> DockerCommandResult:
         return self._control(("create", *tuple(args)), timeout_seconds=20.0)
 
@@ -326,29 +367,25 @@ def safe_container_name(run_id: str) -> str:
     return ("grading-app-%s" % cleaned)[:120]
 
 
-def build_docker_create_args(
+def _base_docker_create_args(
     *,
     container_name: str,
     image_reference: str,
     submission_dir: str,
     grader_dir: str,
     output_dir: str,
-    entrypoint: str,
     memory_mb: Optional[int],
     cpu_count: Optional[float],
     pids_limit: Optional[int],
-    runtime_user: str = "65534:65534",
-    interpreter_command: str = "python",
-    tmpfs_size_mb: int = 64,
-) -> Tuple[str, ...]:
-    """Build hardened ``docker create`` arguments for a smoke execution."""
-
+    runtime_user: str,
+    tmpfs_size_mb: int,
+    runtime_dir: Optional[str] = None,
+) -> list:
     name = str(container_name or "").strip()
     image = str(image_reference or "").strip()
     user = str(runtime_user or "").strip()
-    interpreter = str(interpreter_command or "").strip()
-    if not all((name, image, user, interpreter)):
-        raise ValueError("container/image/user/interpreter values must not be empty")
+    if not all((name, image, user)):
+        raise ValueError("container/image/user values must not be empty")
     if isinstance(tmpfs_size_mb, bool) or int(tmpfs_size_mb) <= 0:
         raise ValueError("tmpfs_size_mb must be positive")
 
@@ -370,25 +407,102 @@ def build_docker_create_args(
         "--mount", "type=bind,src=%s,dst=/workspace/grader,readonly" % str(grader_dir),
         "--mount", "type=bind,src=%s,dst=/workspace/output" % str(output_dir),
     ]
+    if runtime_dir is not None:
+        args.extend((
+            "--mount",
+            "type=bind,src=%s,dst=/workspace/runtime,readonly" % str(runtime_dir),
+        ))
     if memory_mb is not None:
         args.extend(("--memory", "%dm" % int(memory_mb)))
-        # Setting memory-swap equal to memory prevents additional container swap.
         args.extend(("--memory-swap", "%dm" % int(memory_mb)))
     if cpu_count is not None:
         args.extend(("--cpus", str(float(cpu_count))))
     if pids_limit is not None:
         args.extend(("--pids-limit", str(int(pids_limit))))
+    return args
 
+
+def build_docker_create_args(
+    *,
+    container_name: str,
+    image_reference: str,
+    submission_dir: str,
+    grader_dir: str,
+    output_dir: str,
+    entrypoint: str,
+    memory_mb: Optional[int],
+    cpu_count: Optional[float],
+    pids_limit: Optional[int],
+    runtime_user: str = "65534:65534",
+    interpreter_command: str = "python",
+    tmpfs_size_mb: int = 64,
+) -> Tuple[str, ...]:
+    """Build hardened ``docker create`` arguments for entrypoint smoke execution."""
+
+    interpreter = str(interpreter_command or "").strip()
+    if not interpreter:
+        raise ValueError("interpreter_command must not be empty")
+    args = _base_docker_create_args(
+        container_name=container_name,
+        image_reference=image_reference,
+        submission_dir=submission_dir,
+        grader_dir=grader_dir,
+        output_dir=output_dir,
+        memory_mb=memory_mb,
+        cpu_count=cpu_count,
+        pids_limit=pids_limit,
+        runtime_user=runtime_user,
+        tmpfs_size_mb=tmpfs_size_mb,
+    )
     normalized_entrypoint = str(entrypoint or "").replace("\\", "/").lstrip("/")
     if not normalized_entrypoint or ".." in normalized_entrypoint.split("/"):
         raise ValueError("entrypoint must be a safe relative path")
     args.extend((
-        image,
+        str(image_reference),
         interpreter,
         "-B",
         "-u",
         "/workspace/submission/%s" % normalized_entrypoint,
     ))
+    return tuple(args)
+
+
+def build_docker_create_args_for_command(
+    *,
+    container_name: str,
+    image_reference: str,
+    submission_dir: str,
+    grader_dir: str,
+    output_dir: str,
+    runtime_dir: str,
+    command: Sequence[str],
+    memory_mb: Optional[int],
+    cpu_count: Optional[float],
+    pids_limit: Optional[int],
+    runtime_user: str = "65534:65534",
+    tmpfs_size_mb: int = 64,
+) -> Tuple[str, ...]:
+    """Build the same hardened container with an explicit internal command."""
+
+    command = tuple(str(part) for part in command)
+    if not command or not command[0].strip():
+        raise ValueError("container command must not be empty")
+    args = _base_docker_create_args(
+        container_name=container_name,
+        image_reference=image_reference,
+        submission_dir=submission_dir,
+        grader_dir=grader_dir,
+        output_dir=output_dir,
+        runtime_dir=runtime_dir,
+        memory_mb=memory_mb,
+        cpu_count=cpu_count,
+        pids_limit=pids_limit,
+        runtime_user=runtime_user,
+        tmpfs_size_mb=tmpfs_size_mb,
+    )
+    args.extend(("--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"))
+    args.append(str(image_reference))
+    args.extend(command)
     return tuple(args)
 
 __all__ = [
@@ -398,6 +512,7 @@ __all__ = [
     "DockerContainerState",
     "DockerImageInfo",
     "build_docker_create_args",
+    "build_docker_create_args_for_command",
     "run_bounded_command",
     "safe_container_name",
 ]

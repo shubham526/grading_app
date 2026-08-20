@@ -1,10 +1,9 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-5 provide domain/configuration contracts, immutable instructor
-test-bundle storage, a canonical-submission-to-execution-plan bridge, the
-execution-backend abstraction, and the first hardened Docker execution backend.
-Direct host execution remains prohibited; structured pytest execution arrives in
-Commit 6.
+v2.3.3 Commits 1-6 provide domain/configuration contracts, immutable instructor
+test-bundle storage, canonical execution planning, hardened Docker execution, and
+structured pytest result capture with public/hidden-test redaction. Direct host
+execution remains prohibited.
 """
 
 from .config import (
@@ -59,6 +58,8 @@ from .errors import (
     HostExecutionDisabledError,
     NoCanonicalSubmissionError,
     ProgrammingSubmissionContractError,
+    PytestAdapterError,
+    PytestResultProtocolError,
     UnsupportedAutogradingLanguageError,
     UnsupportedAutogradingRunnerError,
     UnsupportedAutogradingSchemaError,
@@ -72,18 +73,23 @@ from .execution import (
     BackendAvailability,
     BackendExecutionRecord,
     DEFAULT_DOCKER_IMAGE,
+    DEFAULT_DOCKER_PYTEST_IMAGE,
+    DEFAULT_EXPECTED_PYTEST_VERSION,
     DEFAULT_DOCKER_INTERPRETER,
     DEFAULT_DOCKER_RUNTIME_USER,
     DEFAULT_DOCKER_TMPFS_MB,
     DOCKER_BACKEND_NAME,
+    DOCKER_PYTEST_BACKEND_NAME,
     DockerCLI,
     DockerCommandResult,
     DockerContainerState,
     DockerExecutionBackend,
+    DockerPytestExecutionBackend,
     DockerImageInfo,
     MaterializedSandbox,
     SandboxMaterializer,
     build_docker_create_args,
+    build_docker_create_args_for_command,
     run_bounded_command,
     safe_container_name,
     EXECUTION_AVAILABILITY_SCHEMA_VERSION,
@@ -92,6 +98,21 @@ from .execution import (
     TERMINAL_EXECUTION_STATUSES,
     probe_backends,
     validate_execution_result,
+)
+from .testing import (
+    DEFAULT_PYTEST_PROTOCOL_MAX_BYTES,
+    PYTEST_RESULT_FILENAME,
+    PYTEST_RESULT_PROTOCOL_SCHEMA_VERSION,
+    PYTEST_RUNTIME_CONFIG_FILENAME,
+    PytestRunResult,
+    build_pytest_runtime_config,
+    execute_pytest_plan,
+    load_pytest_protocol_bytes,
+    protocol_test_results,
+    redact_test_result_for_student,
+    student_safe_test_results,
+    student_safe_pytest_summary,
+    validate_pytest_protocol_payload,
 )
 from .ids import (
     generate_autograding_run_id,
@@ -191,18 +212,23 @@ __all__ = list(_model_all) + [
     "DockerCommandError",
     "DockerSandboxError",
     "DEFAULT_DOCKER_IMAGE",
+    "DEFAULT_DOCKER_PYTEST_IMAGE",
+    "DEFAULT_EXPECTED_PYTEST_VERSION",
     "DEFAULT_DOCKER_INTERPRETER",
     "DEFAULT_DOCKER_RUNTIME_USER",
     "DEFAULT_DOCKER_TMPFS_MB",
     "DOCKER_BACKEND_NAME",
+    "DOCKER_PYTEST_BACKEND_NAME",
     "DockerCLI",
     "DockerCommandResult",
     "DockerContainerState",
     "DockerExecutionBackend",
+    "DockerPytestExecutionBackend",
     "DockerImageInfo",
     "MaterializedSandbox",
     "SandboxMaterializer",
     "build_docker_create_args",
+    "build_docker_create_args_for_command",
     "run_bounded_command",
     "safe_container_name",
     "ExecutionBackend",
@@ -223,6 +249,8 @@ __all__ = list(_model_all) + [
     "PROGRAMMING_PATH_METADATA_KEY",
     "PlannedWorkspaceFile",
     "ProgrammingSubmissionContractError",
+    "PytestAdapterError",
+    "PytestResultProtocolError",
     "ProgrammingSubmissionSelection",
     "SUBMISSION_DIRECTORY",
     "WORKSPACE_NAMESPACE_GRADER",
@@ -235,6 +263,19 @@ __all__ = list(_model_all) + [
     "probe_backends",
     "select_programming_submission",
     "validate_execution_result",
+    "DEFAULT_PYTEST_PROTOCOL_MAX_BYTES",
+    "PYTEST_RESULT_FILENAME",
+    "PYTEST_RESULT_PROTOCOL_SCHEMA_VERSION",
+    "PYTEST_RUNTIME_CONFIG_FILENAME",
+    "PytestRunResult",
+    "build_pytest_runtime_config",
+    "execute_pytest_plan",
+    "load_pytest_protocol_bytes",
+    "protocol_test_results",
+    "redact_test_result_for_student",
+    "student_safe_test_results",
+    "student_safe_pytest_summary",
+    "validate_pytest_protocol_payload",
     "DEFAULT_REPORTING_POLICY",
     "SCORING_METHOD_EQUAL_WITHIN_GROUP",
     "SCORING_METHOD_EXPLICIT_TEST_POINTS",

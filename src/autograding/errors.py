@@ -77,6 +77,14 @@ class ExecutionResultProtocolError(AutogradingExecutionError, ValueError):
     """Raised when backend output violates the normalized execution-result protocol."""
 
 
+class PytestAdapterError(AutogradingExecutionError, ValueError):
+    """Raised when a pytest execution request violates the Commit-6 contract."""
+
+
+class PytestResultProtocolError(AutogradingExecutionError, ValueError):
+    """Raised when machine-readable pytest output is missing, malformed, or inconsistent."""
+
+
 class DockerBackendConfigurationError(AutogradingExecutionError, ValueError):
     """Raised when Docker backend settings violate the isolated-run contract."""
 
@@ -127,6 +135,8 @@ __all__ = [
     "HostExecutionDisabledError",
     "NoCanonicalSubmissionError",
     "ProgrammingSubmissionContractError",
+    "PytestAdapterError",
+    "PytestResultProtocolError",
     "UnsupportedAutogradingLanguageError",
     "UnsupportedAutogradingRunnerError",
     "UnsupportedAutogradingSchemaError",

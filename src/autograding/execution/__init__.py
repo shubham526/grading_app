@@ -1,7 +1,7 @@
 """Execution backends for v2.3.3 programming autograding.
 
-Commit 5 adds the first production backend capable of running student Python:
-a hardened Docker CLI backend.  Direct host execution remains prohibited.
+Commit 6 adds structured pytest execution on top of the hardened Docker CLI
+backend. Direct host execution remains prohibited.
 """
 
 from .availability import (
@@ -24,12 +24,19 @@ from .docker_backend import (
     DOCKER_BACKEND_NAME,
     DockerExecutionBackend,
 )
+from .docker_pytest_backend import (
+    DEFAULT_DOCKER_PYTEST_IMAGE,
+    DEFAULT_EXPECTED_PYTEST_VERSION,
+    DOCKER_PYTEST_BACKEND_NAME,
+    DockerPytestExecutionBackend,
+)
 from .docker_command import (
     DockerCLI,
     DockerCommandResult,
     DockerContainerState,
     DockerImageInfo,
     build_docker_create_args,
+    build_docker_create_args_for_command,
     run_bounded_command,
     safe_container_name,
 )
@@ -52,14 +59,18 @@ __all__ = [
     "BackendAvailability",
     "BackendExecutionRecord",
     "DEFAULT_DOCKER_IMAGE",
+    "DEFAULT_DOCKER_PYTEST_IMAGE",
+    "DEFAULT_EXPECTED_PYTEST_VERSION",
     "DEFAULT_DOCKER_INTERPRETER",
     "DEFAULT_DOCKER_RUNTIME_USER",
     "DEFAULT_DOCKER_TMPFS_MB",
     "DOCKER_BACKEND_NAME",
+    "DOCKER_PYTEST_BACKEND_NAME",
     "DockerCLI",
     "DockerCommandResult",
     "DockerContainerState",
     "DockerExecutionBackend",
+    "DockerPytestExecutionBackend",
     "DockerImageInfo",
     "EXECUTION_AVAILABILITY_SCHEMA_VERSION",
     "ExecutionBackend",
@@ -68,6 +79,7 @@ __all__ = [
     "SandboxMaterializer",
     "TERMINAL_EXECUTION_STATUSES",
     "build_docker_create_args",
+    "build_docker_create_args_for_command",
     "probe_backends",
     "run_bounded_command",
     "safe_container_name",

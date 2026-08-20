@@ -14,7 +14,7 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 from ..errors import DockerSandboxError
 from ..planner import ExecutionPlan
@@ -27,6 +27,7 @@ class MaterializedSandbox:
     submission_dir: Path
     grader_dir: Path
     output_dir: Path
+    runtime_dir: Optional[Path] = None
 
 
 def _open_source_no_follow(path: Path):
@@ -99,7 +100,36 @@ def _copy_group(files: Iterable[PlannedWorkspaceFile], destination_root: Path) -
         _copy_verified(item, destination_root)
 
 
-def _prepare_permissions(root: Path, submission: Path, grader: Path, output: Path) -> None:
+
+def _normalize_runtime_path(value: str) -> str:
+    raw = str(value or "").replace("\\", "/").strip("/")
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        raise DockerSandboxError("Runtime asset path must be a safe relative path")
+    return "/".join(parts)
+
+
+def _write_runtime_files(runtime_dir: Path, runtime_files: Mapping[str, bytes]) -> None:
+    seen = set()
+    for raw_path, raw_data in sorted(runtime_files.items(), key=lambda item: str(item[0]).casefold()):
+        relative = _normalize_runtime_path(raw_path)
+        folded = relative.casefold()
+        if folded in seen:
+            raise DockerSandboxError("Runtime asset path collision: %s" % relative)
+        seen.add(folded)
+        if not isinstance(raw_data, (bytes, bytearray)):
+            raise DockerSandboxError("Runtime asset %s must be bytes" % relative)
+        target = runtime_dir / Path(*relative.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(target, "xb") as handle:
+                handle.write(bytes(raw_data))
+            os.chmod(target, 0o444)
+        except OSError as exc:
+            raise DockerSandboxError("Could not stage runtime asset %s: %s" % (relative, exc)) from exc
+
+
+def _prepare_permissions(root: Path, submission: Path, grader: Path, output: Path, runtime: Optional[Path] = None) -> None:
     # The production container runs as an unprivileged UID.  Staged read-only
     # directories therefore need traversal permission while the isolated output
     # directory needs write permission.  The entire tree is deleted after use.
@@ -107,6 +137,10 @@ def _prepare_permissions(root: Path, submission: Path, grader: Path, output: Pat
         os.chmod(root, 0o755)
         for directory in (submission, grader):
             os.chmod(directory, 0o555)
+        if runtime is not None:
+            for directory in sorted((path for path in runtime.rglob("*") if path.is_dir()), key=lambda p: len(p.parts), reverse=True):
+                os.chmod(directory, 0o555)
+            os.chmod(runtime, 0o555)
         os.chmod(output, 0o777)
     except OSError as exc:
         raise DockerSandboxError("Could not set sandbox staging permissions: %s" % exc) from exc
@@ -119,7 +153,7 @@ class SandboxMaterializer:
         self.parent_dir = None if parent_dir is None else str(Path(parent_dir).expanduser())
         self._root: Optional[Path] = None
 
-    def materialize(self, plan: ExecutionPlan) -> MaterializedSandbox:
+    def materialize(self, plan: ExecutionPlan, runtime_files: Optional[Mapping[str, bytes]] = None) -> MaterializedSandbox:
         if not isinstance(plan, ExecutionPlan):
             raise TypeError("plan must be an ExecutionPlan")
         if self._root is not None:
@@ -138,13 +172,18 @@ class SandboxMaterializer:
         submission = root / "submission"
         grader = root / "grader"
         output = root / "output"
+        runtime = root / "runtime" if runtime_files else None
         try:
             submission.mkdir()
             grader.mkdir()
             output.mkdir()
+            if runtime is not None:
+                runtime.mkdir()
             _copy_group(plan.workspace.submission_files, submission)
             _copy_group(plan.workspace.grader_files, grader)
-            _prepare_permissions(root, submission, grader, output)
+            if runtime is not None:
+                _write_runtime_files(runtime, runtime_files or {})
+            _prepare_permissions(root, submission, grader, output, runtime)
         except Exception:
             self.cleanup()
             raise
@@ -153,6 +192,7 @@ class SandboxMaterializer:
             submission_dir=submission,
             grader_dir=grader,
             output_dir=output,
+            runtime_dir=runtime,
         )
 
     def cleanup(self) -> None:
