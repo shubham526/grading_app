@@ -97,6 +97,14 @@ class DockerSandboxError(AutogradingExecutionError):
     """Raised when immutable inputs cannot be staged for isolated execution."""
 
 
+class AutogradingScoringError(AutogradingError, ValueError):
+    """Base class for deterministic autograding score computation failures."""
+
+
+class ScoringInputError(AutogradingScoringError):
+    """Raised when structured test results cannot be reconciled with config."""
+
+
 class AutogradingBundleError(AutogradingError):
     """Base class for instructor test-bundle ingestion/storage failures."""
 
@@ -122,6 +130,7 @@ __all__ = [
     "AutogradingBundleValidationError",
     "AutogradingError",
     "AutogradingPlanningError",
+    "AutogradingScoringError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
@@ -135,6 +144,7 @@ __all__ = [
     "HostExecutionDisabledError",
     "NoCanonicalSubmissionError",
     "ProgrammingSubmissionContractError",
+    "ScoringInputError",
     "PytestAdapterError",
     "PytestResultProtocolError",
     "UnsupportedAutogradingLanguageError",

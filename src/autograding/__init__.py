@@ -1,9 +1,9 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-6 provide domain/configuration contracts, immutable instructor
+v2.3.3 Commits 1-7 provide domain/configuration contracts, immutable instructor
 test-bundle storage, canonical execution planning, hardened Docker execution, and
-structured pytest result capture with public/hidden-test redaction. Direct host
-execution remains prohibited.
+structured pytest result capture with public/hidden-test redaction, and deterministic
+scoring with explicit review states. Direct host execution remains prohibited.
 """
 
 from .config import (
@@ -45,6 +45,7 @@ from .errors import (
     AutogradingError,
     AutogradingExecutionError,
     AutogradingPlanningError,
+    AutogradingScoringError,
     AutogradingSerializationError,
     AutogradingValidationError,
     CanonicalSubmissionIntegrityError,
@@ -58,6 +59,7 @@ from .errors import (
     HostExecutionDisabledError,
     NoCanonicalSubmissionError,
     ProgrammingSubmissionContractError,
+    ScoringInputError,
     PytestAdapterError,
     PytestResultProtocolError,
     UnsupportedAutogradingLanguageError,
@@ -98,6 +100,19 @@ from .execution import (
     TERMINAL_EXECUTION_STATUSES,
     probe_backends,
     validate_execution_result,
+)
+from .policies import (
+    DEFAULT_TEST_OUTCOME_SCORING_POLICY,
+    SCORING_DECISION_FULL,
+    SCORING_DECISION_REVIEW,
+    SCORING_DECISION_ZERO,
+    SCORING_DECISIONS,
+    TestOutcomeScoringPolicy,
+)
+from .scoring import (
+    AUTOGRADING_SCORING_RESULT_SCHEMA_VERSION,
+    AutogradingScoringResult,
+    score_pytest_run,
 )
 from .testing import (
     DEFAULT_PYTEST_PROTOCOL_MAX_BYTES,
@@ -205,6 +220,7 @@ __all__ = list(_model_all) + [
     "AutogradingError",
     "AutogradingExecutionError",
     "AutogradingPlanningError",
+    "AutogradingScoringError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
@@ -249,6 +265,7 @@ __all__ = list(_model_all) + [
     "PROGRAMMING_PATH_METADATA_KEY",
     "PlannedWorkspaceFile",
     "ProgrammingSubmissionContractError",
+    "ScoringInputError",
     "PytestAdapterError",
     "PytestResultProtocolError",
     "ProgrammingSubmissionSelection",
@@ -276,6 +293,15 @@ __all__ = list(_model_all) + [
     "student_safe_test_results",
     "student_safe_pytest_summary",
     "validate_pytest_protocol_payload",
+    "AUTOGRADING_SCORING_RESULT_SCHEMA_VERSION",
+    "AutogradingScoringResult",
+    "DEFAULT_TEST_OUTCOME_SCORING_POLICY",
+    "SCORING_DECISION_FULL",
+    "SCORING_DECISION_REVIEW",
+    "SCORING_DECISION_ZERO",
+    "SCORING_DECISIONS",
+    "TestOutcomeScoringPolicy",
+    "score_pytest_run",
     "DEFAULT_REPORTING_POLICY",
     "SCORING_METHOD_EQUAL_WITHIN_GROUP",
     "SCORING_METHOD_EXPLICIT_TEST_POINTS",
