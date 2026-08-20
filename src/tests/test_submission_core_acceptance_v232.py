@@ -283,7 +283,7 @@ class TestSubmissionCoreAcceptanceV232(unittest.TestCase):
             self.assertFalse((submission_dir / "main.tex").exists())
             self.assertFalse((derived_dir / "main.tex").exists())
 
-    def test_python_is_preserved_but_never_executed(self):
+    def test_python_is_preserved_without_import_time_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             evidence = root / "submission_evidence"
@@ -310,7 +310,10 @@ class TestSubmissionCoreAcceptanceV232(unittest.TestCase):
             )
             route = route_submission(submission)
             self.assertEqual(route.route, ROUTE_PROGRAMMING_PYTHON)
-            self.assertFalse(route.supported)
+            # v2.3.3 activates the programming-autograding handler family, but
+            # canonical import itself must still never execute student code.
+            self.assertTrue(route.supported)
+            self.assertEqual(route.handler, "programming_autograder")
             self.assertFalse(sentinel.exists())
 
             stored = Path(
