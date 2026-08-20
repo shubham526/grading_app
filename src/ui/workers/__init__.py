@@ -1,5 +1,11 @@
 """Background workers for submission ingestion, import, and transcription."""
 
+from .autograding_worker import (
+    AutogradingOperation,
+    AutogradingWorker,
+    AutogradingWorkerSignals,
+    new_autograding_request_id,
+)
 from .submission_import_worker import (
     SubmissionImportOperation,
     SubmissionImportWorker,
@@ -14,6 +20,10 @@ from .submission_worker import (
 )
 
 __all__ = [
+    "AutogradingOperation",
+    "AutogradingWorker",
+    "AutogradingWorkerSignals",
+    "new_autograding_request_id",
     "SubmissionImportOperation",
     "SubmissionImportWorker",
     "SubmissionImportWorkerSignals",

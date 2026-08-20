@@ -25,6 +25,10 @@ from src.ui.dialogs.master_evidence_export_dialog import MasterEvidenceExportDia
 from src.ui.dialogs.similarity_dialog import SimilarityReviewDialog
 from src.ui.dialogs.submission_history_dialog import SubmissionHistoryDialog
 from src.ui.dialogs.submission_import_dialog import SubmissionImportDialog
+from src.ui.dialogs.autograding_setup_dialog import AutogradingSetupDialog
+from src.ui.dialogs.autograding_results_dialog import AutogradingResultsDialog
+from src.ui.dialogs.autograding_history_dialog import AutogradingHistoryDialog
+from src.ui.dialogs.autograding_batch_dialog import AutogradingBatchDialog
 
 from PyQt5.QtWidgets import (
     QAction, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -60,6 +64,8 @@ from src.core.roster import (
 )
 from src.core.rubric import load_rubric_from_file
 from src.submissions import SubmissionRepository, load_reference_solution
+from src.autograding.execution.docker_pytest_backend import DEFAULT_DOCKER_PYTEST_IMAGE
+from src.autograding.service import AutogradingGradeResult, AutogradingService
 
 from src.ui.widgets.header import HeaderWidget
 from src.ui.widgets.status_bar import StatusBarWidget
@@ -70,6 +76,10 @@ from src.grading_session import (
     GradingSessionCheckpoint,
     load_grading_session_checkpoint,
     save_grading_session_checkpoint,
+)
+from src.ui.workers.autograding_worker import (
+    AutogradingOperation,
+    AutogradingWorker,
 )
 from src.ui.workers.submission_worker import (
     SubmissionOperation,
@@ -192,6 +202,12 @@ class RubricGrader(QMainWindow):
         self._latest_connection_request_id = None
         self._latest_reference_request_id = None
         self._submission_settings_dialog = None
+
+        # v2.3.3 programming-autograding UI orchestration. Backend execution,
+        # scoring, and persistence remain in src.autograding.
+        self._autograding_service = None
+        self._autograding_workers = {}
+        self._autograding_batch_dialog = None
         self.submission_inference_settings = load_submission_settings()
         self._submission_focus_mode = False
         self._workspace_sizes_before_focus = None
@@ -386,6 +402,52 @@ class RubricGrader(QMainWindow):
         )
         self.submission_history_action.triggered.connect(self.show_submission_history)
         tools_menu.addAction(self.submission_history_action)
+
+        autograding_menu = QMenu("Programming Autograding", self)
+        autograding_menu.setIcon(qta.icon('fa5s.code'))
+
+        self.configure_autograder_action = QAction(
+            qta.icon('fa5s.cogs'), "Configure Autograder…", self
+        )
+        self.configure_autograder_action.setToolTip(
+            "Import/select an immutable test bundle and Docker pytest runtime"
+        )
+        self.configure_autograder_action.triggered.connect(self.show_autograding_setup)
+        autograding_menu.addAction(self.configure_autograder_action)
+        autograding_menu.addSeparator()
+
+        self.grade_current_programming_action = QAction(
+            qta.icon('fa5s.play'), "Grade Current Submission", self
+        )
+        self.grade_current_programming_action.setToolTip(
+            "Run the current student's active canonical Python attempt in the isolated pytest runtime"
+        )
+        self.grade_current_programming_action.triggered.connect(
+            self.grade_current_programming_submission
+        )
+        autograding_menu.addAction(self.grade_current_programming_action)
+
+        self.grade_all_programming_action = QAction(
+            qta.icon('fa5s.tasks'), "Grade All Active Submissions…", self
+        )
+        self.grade_all_programming_action.setToolTip(
+            "Batch-grade all roster students whose active canonical submission satisfies the programming contract"
+        )
+        self.grade_all_programming_action.triggered.connect(
+            self.grade_all_programming_submissions
+        )
+        autograding_menu.addAction(self.grade_all_programming_action)
+
+        self.autograding_history_action = QAction(
+            qta.icon('fa5s.history'), "Autograding History…", self
+        )
+        self.autograding_history_action.setToolTip(
+            "View immutable programming-autograding runs for the current student"
+        )
+        self.autograding_history_action.triggered.connect(self.show_autograding_history)
+        autograding_menu.addAction(self.autograding_history_action)
+
+        tools_menu.addMenu(autograding_menu)
 
         self.resume_grading_session_action = QAction(
             qta.icon('fa5s.play-circle'), "Resume Grading Session", self
@@ -1468,6 +1530,313 @@ class RubricGrader(QMainWindow):
         )
         dialog.submission_activated.connect(self._on_submission_history_activated)
         dialog.exec_()
+
+    # ------------------------------------------------------------------
+    # v2.3.3 programming autograding
+    # ------------------------------------------------------------------
+
+    def _autograding_settings_key(self, assessment_id, name):
+        return "autograding/%s/%s" % (str(assessment_id), str(name))
+
+    def _selected_autograding_bundle_id(self, assessment_id):
+        value = self.ui_settings.value(
+            self._autograding_settings_key(assessment_id, "bundle_id"), ""
+        )
+        return str(value or "").strip() or None
+
+    def _autograding_runtime_image(self, assessment_id):
+        value = self.ui_settings.value(
+            self._autograding_settings_key(assessment_id, "runtime_image"),
+            DEFAULT_DOCKER_PYTEST_IMAGE,
+        )
+        return str(value or DEFAULT_DOCKER_PYTEST_IMAGE).strip() or DEFAULT_DOCKER_PYTEST_IMAGE
+
+    def _save_autograding_configuration(self, assessment_id, bundle_id, runtime_image):
+        self.ui_settings.setValue(
+            self._autograding_settings_key(assessment_id, "bundle_id"), bundle_id
+        )
+        self.ui_settings.setValue(
+            self._autograding_settings_key(assessment_id, "runtime_image"), runtime_image
+        )
+        self.ui_settings.sync()
+
+    def _ensure_autograding_service(self, *, allow_prompt=True):
+        assessment_id = self._canonical_assessment_id()
+        if not assessment_id:
+            if allow_prompt:
+                QMessageBox.warning(
+                    self,
+                    "Missing Assessment ID",
+                    "Load a rubric with a stable assessment_id before using programming autograding.",
+                )
+            return None
+        if not self._ensure_assessments_dir(allow_prompt=allow_prompt):
+            return None
+        repository = self._ensure_canonical_submission_repository()
+        if repository is None:
+            return None
+        workspace = os.path.abspath(self.assessments_dir)
+        evidence_root = os.path.abspath(self.submission_controller.evidence_root)
+        current = self._autograding_service
+        if (
+            current is None
+            or os.path.abspath(current.workspace_root) != workspace
+            or os.path.abspath(current.evidence_root) != evidence_root
+        ):
+            current = AutogradingService(
+                workspace,
+                evidence_root=evidence_root,
+                submission_repository=repository,
+            )
+            self._autograding_service = current
+        return current
+
+    def show_autograding_setup(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return False
+        assessment_id = self._canonical_assessment_id()
+        dialog = AutogradingSetupDialog(
+            service,
+            assessment_id,
+            selected_bundle_id=self._selected_autograding_bundle_id(assessment_id),
+            runtime_image=self._autograding_runtime_image(assessment_id),
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return False
+        bundle_id = dialog.selected_bundle_id
+        if not bundle_id:
+            return False
+        self._save_autograding_configuration(
+            assessment_id, bundle_id, dialog.runtime_image
+        )
+        self.status_bar.show_temporary_message(
+            "Programming autograder configured for %s" % assessment_id
+        )
+        return True
+
+    def _require_autograding_configuration(self, service, assessment_id):
+        bundle_id = self._selected_autograding_bundle_id(assessment_id)
+        image = self._autograding_runtime_image(assessment_id)
+        if bundle_id:
+            try:
+                service.load_bundle(assessment_id, bundle_id)
+            except Exception:
+                bundle_id = None
+        if not bundle_id:
+            if not self.show_autograding_setup():
+                return None
+            bundle_id = self._selected_autograding_bundle_id(assessment_id)
+            image = self._autograding_runtime_image(assessment_id)
+        return bundle_id, image
+
+    def _current_autograding_student_id(self):
+        record = self._current_student_record()
+        if record is not None and record.student_id:
+            return str(record.student_id).strip()
+        value = self._active_submission_student_id()
+        return None if not value else str(value).strip() or None
+
+    def _set_autograding_actions_busy(self, busy):
+        enabled = not bool(busy)
+        for name in (
+            "grade_current_programming_action",
+            "grade_all_programming_action",
+            "configure_autograder_action",
+        ):
+            action = getattr(self, name, None)
+            if action is not None:
+                action.setEnabled(enabled)
+
+    def grade_current_programming_submission(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return
+        assessment_id = self._canonical_assessment_id()
+        student_id = self._current_autograding_student_id()
+        if not student_id:
+            QMessageBox.warning(
+                self,
+                "No Current Student",
+                "Select/load a student before grading a programming submission.",
+            )
+            return
+        configured = self._require_autograding_configuration(service, assessment_id)
+        if configured is None:
+            return
+        bundle_id, image = configured
+        try:
+            plan = service.build_plan(assessment_id, student_id, bundle_id)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Programming Submission Not Ready",
+                str(exc),
+            )
+            return
+
+        attempt = "—" if plan.attempt is None else str(plan.attempt)
+        answer = QMessageBox.question(
+            self,
+            "Run Programming Autograder?",
+            "Grade the active canonical programming submission?\n\n"
+            "Student: %s\nAttempt: %s\nBundle: %s\nRuntime: %s\n\n"
+            "This creates a new immutable autograding run and does not modify manual rubric scores."
+            % (student_id, attempt, bundle_id, image),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        worker = AutogradingWorker(
+            service,
+            AutogradingOperation.GRADE_ONE,
+            parameters={
+                "assessment_id": assessment_id,
+                "student_id": student_id,
+                "bundle_id": bundle_id,
+                "image": image,
+                "metadata": {"ui_operation": "grade_current"},
+            },
+        )
+        self._autograding_workers[worker.request_id] = worker
+        worker.signals.started.connect(self._on_autograding_worker_started)
+        worker.signals.completed.connect(self._on_autograding_worker_completed)
+        worker.signals.failed.connect(self._on_autograding_worker_failed)
+        worker.signals.finished.connect(self._on_autograding_worker_finished)
+        self._set_autograding_actions_busy(True)
+        self.submission_thread_pool.start(worker)
+
+    def _on_autograding_worker_started(self, _request_id, _operation):
+        self.status_bar.set_status("Programming autograding in progress…")
+        self.status_bar.show_temporary_message(
+            "Running isolated public/hidden pytest tests…"
+        )
+
+    def _on_autograding_worker_completed(self, _request_id, _operation, payload):
+        if not isinstance(payload, AutogradingGradeResult):
+            return
+        summary = payload.scoring_result.score_summary
+        if summary.final_score is None:
+            message = "Autograding run completed and requires instructor review."
+        else:
+            message = "Autograding completed: %g / %g" % (
+                summary.final_score,
+                summary.max_score,
+            )
+        self.status_bar.set_status(message)
+        self.status_bar.show_temporary_message(message)
+        AutogradingResultsDialog(payload.stored_run, parent=self).exec_()
+
+    def _on_autograding_worker_failed(
+        self, _request_id, _operation, error_type, error_message
+    ):
+        QMessageBox.critical(
+            self,
+            "Programming Autograding Failed",
+            "%s: %s" % (error_type, error_message),
+        )
+        self.status_bar.set_status("Programming autograding failed")
+
+    def _on_autograding_worker_finished(self, request_id, _operation):
+        self._autograding_workers.pop(request_id, None)
+        if not self._autograding_workers:
+            self._set_autograding_actions_busy(False)
+
+    def grade_all_programming_submissions(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return
+        assessment_id = self._canonical_assessment_id()
+        configured = self._require_autograding_configuration(service, assessment_id)
+        if configured is None:
+            return
+        bundle_id, image = configured
+
+        records = list(self.student_records or self.roster_records or ())
+        student_ids = []
+        labels = {}
+        for record in records:
+            student_id = str(getattr(record, "student_id", "") or "").strip()
+            if not student_id or student_id in labels:
+                continue
+            student_ids.append(student_id)
+            labels[student_id] = str(getattr(record, "student_name", "") or student_id)
+        if not student_ids:
+            QMessageBox.warning(
+                self,
+                "No Roster",
+                "Load a roster before batch programming autograding.",
+            )
+            return
+
+        eligible, rejected = service.eligible_active_students(
+            assessment_id, student_ids, bundle_id
+        )
+        if not eligible:
+            details = "\n".join(
+                "%s: %s" % (student_id, reason)
+                for student_id, reason in sorted(rejected.items())
+            )
+            QMessageBox.information(
+                self,
+                "No Eligible Programming Submissions",
+                "No roster student currently has an active canonical submission that satisfies "
+                "this autograder's Python file contract.\n\n%s" % details,
+            )
+            return
+        if rejected:
+            preview = "\n".join(
+                "%s: %s" % (student_id, rejected[student_id])
+                for student_id in list(sorted(rejected))[:8]
+            )
+            if len(rejected) > 8:
+                preview += "\n… and %d more" % (len(rejected) - 8)
+            QMessageBox.information(
+                self,
+                "Batch Eligibility",
+                "%d student(s) are eligible. %d roster student(s) will be skipped because they "
+                "have no compatible active programming submission.\n\n%s"
+                % (len(eligible), len(rejected), preview),
+            )
+
+        dialog = AutogradingBatchDialog(
+            service,
+            assessment_id,
+            bundle_id,
+            eligible,
+            student_labels=labels,
+            image=image,
+            thread_pool=self.submission_thread_pool,
+            parent=self,
+        )
+        self._autograding_batch_dialog = dialog
+        try:
+            dialog.exec_()
+        finally:
+            self._autograding_batch_dialog = None
+
+    def show_autograding_history(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return
+        assessment_id = self._canonical_assessment_id()
+        student_id = self._current_autograding_student_id()
+        if not student_id:
+            QMessageBox.warning(
+                self,
+                "No Current Student",
+                "Select/load a student before viewing programming-autograding history.",
+            )
+            return
+        AutogradingHistoryDialog(
+            service,
+            assessment_id,
+            student_id,
+            parent=self,
+        ).exec_()
 
     def _on_submission_history_activated(self, parsed_submission):
         """Refresh the visible workspace after a history dialog activates an attempt."""
@@ -3614,6 +3983,11 @@ class RubricGrader(QMainWindow):
             self._reattach_grading_workspace(close_dialog=True)
         self._save_ui_preferences()
         for worker in list(self._submission_workers.values()):
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+        for worker in list(self._autograding_workers.values()):
             try:
                 worker.cancel()
             except Exception:
