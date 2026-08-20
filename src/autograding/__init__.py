@@ -1,9 +1,8 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-7 provide domain/configuration contracts, immutable instructor
+v2.3.3 Commits 1-8 provide domain/configuration contracts, immutable instructor
 test-bundle storage, canonical execution planning, hardened Docker execution, and
-structured pytest result capture with public/hidden-test redaction, and deterministic
-scoring with explicit review states. Direct host execution remains prohibited.
+structured pytest result capture with public/hidden-test redaction, deterministic scoring with explicit review states, and immutable run-history persistence. Direct host execution remains prohibited.
 """
 
 from .config import (
@@ -45,6 +44,9 @@ from .errors import (
     AutogradingError,
     AutogradingExecutionError,
     AutogradingPlanningError,
+    AutogradingRunError,
+    AutogradingRunIntegrityError,
+    AutogradingRunStorageError,
     AutogradingScoringError,
     AutogradingSerializationError,
     AutogradingValidationError,
@@ -113,6 +115,31 @@ from .scoring import (
     AUTOGRADING_SCORING_RESULT_SCHEMA_VERSION,
     AutogradingScoringResult,
     score_pytest_run,
+)
+from .repository import (
+    AutogradingRunRepository,
+    RUNS_DIRECTORY,
+    RUN_INDEX_FILENAME,
+    build_autograding_run_record,
+)
+from .reporting import (
+    build_history_report,
+    build_instructor_run_report,
+    build_student_safe_run_report,
+)
+from .storage import (
+    AUTOGRADING_RUN_EVIDENCE_DIRECTORY,
+    AUTOGRADING_RUN_INDEX_SCHEMA_VERSION,
+    AUTOGRADING_RUN_MANIFEST_FILENAME,
+    AUTOGRADING_RUN_PLAN_FILENAME,
+    AUTOGRADING_RUN_PYTEST_FILENAME,
+    AUTOGRADING_RUN_SCORING_FILENAME,
+    AUTOGRADING_RUN_STDERR_FILENAME,
+    AUTOGRADING_RUN_STDOUT_FILENAME,
+    AUTOGRADING_RUN_STORAGE_SCHEMA_VERSION,
+    AutogradingRunReference,
+    RunFileRecord,
+    StoredAutogradingRun,
 )
 from .testing import (
     DEFAULT_PYTEST_PROTOCOL_MAX_BYTES,
@@ -220,6 +247,28 @@ __all__ = list(_model_all) + [
     "AutogradingError",
     "AutogradingExecutionError",
     "AutogradingPlanningError",
+    "AutogradingRunError",
+    "AutogradingRunIntegrityError",
+    "AutogradingRunStorageError",
+    "AutogradingRunRepository",
+    "AutogradingRunReference",
+    "StoredAutogradingRun",
+    "RunFileRecord",
+    "RUNS_DIRECTORY",
+    "RUN_INDEX_FILENAME",
+    "AUTOGRADING_RUN_EVIDENCE_DIRECTORY",
+    "AUTOGRADING_RUN_INDEX_SCHEMA_VERSION",
+    "AUTOGRADING_RUN_MANIFEST_FILENAME",
+    "AUTOGRADING_RUN_PLAN_FILENAME",
+    "AUTOGRADING_RUN_PYTEST_FILENAME",
+    "AUTOGRADING_RUN_SCORING_FILENAME",
+    "AUTOGRADING_RUN_STDERR_FILENAME",
+    "AUTOGRADING_RUN_STDOUT_FILENAME",
+    "AUTOGRADING_RUN_STORAGE_SCHEMA_VERSION",
+    "build_autograding_run_record",
+    "build_history_report",
+    "build_instructor_run_report",
+    "build_student_safe_run_report",
     "AutogradingScoringError",
     "AutogradingSerializationError",
     "AutogradingValidationError",

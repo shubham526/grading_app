@@ -105,6 +105,18 @@ class ScoringInputError(AutogradingScoringError):
     """Raised when structured test results cannot be reconciled with config."""
 
 
+class AutogradingRunError(AutogradingError):
+    """Base class for immutable autograding-run persistence failures."""
+
+
+class AutogradingRunIntegrityError(AutogradingRunError, ValueError):
+    """Raised when stored run history/manifests/evidence fail verification."""
+
+
+class AutogradingRunStorageError(AutogradingRunError):
+    """Raised when an immutable autograding run cannot be committed safely."""
+
+
 class AutogradingBundleError(AutogradingError):
     """Base class for instructor test-bundle ingestion/storage failures."""
 
@@ -130,6 +142,9 @@ __all__ = [
     "AutogradingBundleValidationError",
     "AutogradingError",
     "AutogradingPlanningError",
+    "AutogradingRunError",
+    "AutogradingRunIntegrityError",
+    "AutogradingRunStorageError",
     "AutogradingScoringError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
