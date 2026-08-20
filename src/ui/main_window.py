@@ -14,6 +14,7 @@ selected/counted, analytics, and ABET semantics are intentionally unchanged.
 """
 
 import json
+from datetime import datetime
 import os
 import tempfile
 import time
@@ -427,52 +428,6 @@ class RubricGrader(QMainWindow):
         )
         self.submission_history_action.triggered.connect(self.show_submission_history)
         tools_menu.addAction(self.submission_history_action)
-
-        autograding_menu = QMenu("Programming Autograding", self)
-        autograding_menu.setIcon(qta.icon('fa5s.code'))
-
-        self.configure_autograder_action = QAction(
-            qta.icon('fa5s.cogs'), "Configure Autograder…", self
-        )
-        self.configure_autograder_action.setToolTip(
-            "Import/select an immutable test bundle and Docker pytest runtime"
-        )
-        self.configure_autograder_action.triggered.connect(self.show_autograding_setup)
-        autograding_menu.addAction(self.configure_autograder_action)
-        autograding_menu.addSeparator()
-
-        self.grade_current_programming_action = QAction(
-            qta.icon('fa5s.play'), "Grade Current Submission", self
-        )
-        self.grade_current_programming_action.setToolTip(
-            "Run the current student's active canonical Python attempt in the isolated pytest runtime"
-        )
-        self.grade_current_programming_action.triggered.connect(
-            self.grade_current_programming_submission
-        )
-        autograding_menu.addAction(self.grade_current_programming_action)
-
-        self.grade_all_programming_action = QAction(
-            qta.icon('fa5s.tasks'), "Grade All Active Submissions…", self
-        )
-        self.grade_all_programming_action.setToolTip(
-            "Batch-grade all roster students whose active canonical submission satisfies the programming contract"
-        )
-        self.grade_all_programming_action.triggered.connect(
-            self.grade_all_programming_submissions
-        )
-        autograding_menu.addAction(self.grade_all_programming_action)
-
-        self.autograding_history_action = QAction(
-            qta.icon('fa5s.history'), "Autograding History…", self
-        )
-        self.autograding_history_action.setToolTip(
-            "View immutable programming-autograding runs for the current student"
-        )
-        self.autograding_history_action.triggered.connect(self.show_autograding_history)
-        autograding_menu.addAction(self.autograding_history_action)
-
-        tools_menu.addMenu(autograding_menu)
 
         self.resume_grading_session_action = QAction(
             qta.icon('fa5s.play-circle'), "Resume Grading Session", self
@@ -942,8 +897,7 @@ class RubricGrader(QMainWindow):
     def _install_grading_mode_shell(self):
         """Wrap the exact v2.3.3 written UI in an explicit workspace host.
 
-        Commit 1 deliberately does not rebuild or relocate the written grading
-        controls. The already-constructed v2.3.3 central widget is detached as
+        The shell does not rebuild or relocate the written grading controls. The already-constructed v2.3.3 central widget is detached as
         one intact QWidget and inserted into the mode stack. Its child widgets,
         signals, splitters, controller references, and grading state remain the
         same objects.
@@ -967,8 +921,32 @@ class RubricGrader(QMainWindow):
         self.setCentralWidget(self._mode_stack)
 
         self.mode_selection_page.mode_selected.connect(self.set_grading_mode)
-        self.programming_workspace.choose_mode_button.clicked.connect(
-            self.show_grading_mode_selector
+        self.programming_workspace.configure_autograder_requested.connect(
+            self.show_autograding_setup
+        )
+        self.programming_workspace.import_submissions_requested.connect(
+            self.show_submission_import_dialog
+        )
+        self.programming_workspace.check_runtime_requested.connect(
+            self.check_programming_runtime
+        )
+        self.programming_workspace.grade_selected_requested.connect(
+            self.grade_current_programming_submission
+        )
+        self.programming_workspace.grade_all_requested.connect(
+            self.grade_all_programming_submissions
+        )
+        self.programming_workspace.run_history_requested.connect(
+            self.show_autograding_history
+        )
+        self.programming_workspace.view_results_requested.connect(
+            self.view_latest_programming_result
+        )
+        self.programming_workspace.grade_again_requested.connect(
+            self.grade_current_programming_submission
+        )
+        self.programming_workspace.student_selected.connect(
+            self._on_programming_student_selected
         )
 
         self._install_grading_mode_menu()
@@ -1005,8 +983,8 @@ class RubricGrader(QMainWindow):
     def set_grading_mode(self, mode):
         """Activate a top-level grading workspace.
 
-        Commit 1 changes presentation only. Shared assessment, roster, canonical
-        submission, existing written grading, and v2.3.3 autograding state
+        Shared assessment, roster, canonical submission, existing written
+        grading, and v2.3.3 autograding state
         remain owned by this window and are not reset by a mode change.
         """
 
@@ -1024,6 +1002,8 @@ class RubricGrader(QMainWindow):
 
         self.current_grading_mode = mode
         self._mode_stack.setCurrentWidget(target)
+        if mode is GradingMode.PROGRAMMING:
+            self._refresh_programming_workspace()
         self.setWindowTitle(
             "{} — {}".format(_BASE_WINDOW_TITLE, mode.display_name)
         )
@@ -1515,8 +1495,12 @@ class RubricGrader(QMainWindow):
         return str(value).strip() or None
 
     def _ensure_canonical_submission_repository(self):
-        """Return a canonical repository rooted in the current assessment workspace."""
-        if not self._ensure_assessments_dir(allow_prompt=True):
+        """Return a canonical repository, preserving the established prompting path."""
+        return self._canonical_submission_repository(allow_prompt=True)
+
+    def _canonical_submission_repository(self, *, allow_prompt=True):
+        """Return a canonical repository with an explicit prompt policy."""
+        if not self._ensure_assessments_dir(allow_prompt=allow_prompt):
             return None
         self._configure_submission_evidence_root()
         evidence_root = self.submission_controller.evidence_root
@@ -1631,6 +1615,7 @@ class RubricGrader(QMainWindow):
         if parse_errors:
             message += f" · {len(parse_errors)} evidence preparation warning(s)"
         self.status_bar.show_temporary_message(message)
+        self._refresh_programming_workspace()
 
     def show_submission_history(self):
         """Show immutable canonical attempts for the current student."""
@@ -1712,7 +1697,9 @@ class RubricGrader(QMainWindow):
             return None
         if not self._ensure_assessments_dir(allow_prompt=allow_prompt):
             return None
-        repository = self._ensure_canonical_submission_repository()
+        repository = self._canonical_submission_repository(
+            allow_prompt=allow_prompt
+        )
         if repository is None:
             return None
         workspace = os.path.abspath(self.assessments_dir)
@@ -1754,6 +1741,7 @@ class RubricGrader(QMainWindow):
         self.status_bar.show_temporary_message(
             "Programming autograder configured for %s" % assessment_id
         )
+        self._refresh_programming_workspace()
         return True
 
     def _require_autograding_configuration(self, service, assessment_id):
@@ -1772,6 +1760,13 @@ class RubricGrader(QMainWindow):
         return bundle_id, image
 
     def _current_autograding_student_id(self):
+        if (
+            self.current_grading_mode is GradingMode.PROGRAMMING
+            and self.programming_workspace is not None
+        ):
+            selected = self.programming_workspace.selected_student_id()
+            if selected:
+                return selected
         record = self._current_student_record()
         if record is not None and record.student_id:
             return str(record.student_id).strip()
@@ -1779,15 +1774,8 @@ class RubricGrader(QMainWindow):
         return None if not value else str(value).strip() or None
 
     def _set_autograding_actions_busy(self, busy):
-        enabled = not bool(busy)
-        for name in (
-            "grade_current_programming_action",
-            "grade_all_programming_action",
-            "configure_autograder_action",
-        ):
-            action = getattr(self, name, None)
-            if action is not None:
-                action.setEnabled(enabled)
+        if self.programming_workspace is not None:
+            self.programming_workspace.set_busy(bool(busy))
 
     def grade_current_programming_submission(self):
         service = self._ensure_autograding_service(allow_prompt=True)
@@ -1849,13 +1837,40 @@ class RubricGrader(QMainWindow):
         self._set_autograding_actions_busy(True)
         self.submission_thread_pool.start(worker)
 
-    def _on_autograding_worker_started(self, _request_id, _operation):
+    def _on_autograding_worker_started(self, _request_id, operation):
+        if operation == AutogradingOperation.CHECK_RUNTIME.value:
+            self.status_bar.set_status("Checking programming runtime…")
+            if self.programming_workspace is not None:
+                self.programming_workspace.set_runtime_status(
+                    "Runtime: checking…", available=None
+                )
+            return
         self.status_bar.set_status("Programming autograding in progress…")
         self.status_bar.show_temporary_message(
             "Running isolated public/hidden pytest tests…"
         )
 
-    def _on_autograding_worker_completed(self, _request_id, _operation, payload):
+    def _on_autograding_worker_completed(self, _request_id, operation, payload):
+        if operation == AutogradingOperation.CHECK_RUNTIME.value:
+            available = bool(getattr(payload, "available", False))
+            reason = getattr(payload, "reason", None)
+            if available:
+                message = "Runtime: ready"
+                self.status_bar.set_status("Programming runtime ready")
+                self.status_bar.show_temporary_message(
+                    "Docker pytest runtime is available"
+                )
+            else:
+                message = "Runtime: unavailable"
+                if reason:
+                    message += " — %s" % reason
+                self.status_bar.set_status("Programming runtime unavailable")
+            if self.programming_workspace is not None:
+                self.programming_workspace.set_runtime_status(
+                    message, available=available
+                )
+            return
+
         if not isinstance(payload, AutogradingGradeResult):
             return
         summary = payload.scoring_result.score_summary
@@ -1868,11 +1883,27 @@ class RubricGrader(QMainWindow):
             )
         self.status_bar.set_status(message)
         self.status_bar.show_temporary_message(message)
+        self._refresh_programming_workspace(
+            selected_student_id=payload.plan.student_id
+        )
         AutogradingResultsDialog(payload.stored_run, parent=self).exec_()
 
     def _on_autograding_worker_failed(
-        self, _request_id, _operation, error_type, error_message
+        self, _request_id, operation, error_type, error_message
     ):
+        if operation == AutogradingOperation.CHECK_RUNTIME.value:
+            message = "%s: %s" % (error_type, error_message)
+            if self.programming_workspace is not None:
+                self.programming_workspace.set_runtime_status(
+                    "Runtime: unavailable — %s" % message, available=False
+                )
+            self.status_bar.set_status("Programming runtime check failed")
+            QMessageBox.warning(
+                self,
+                "Programming Runtime Unavailable",
+                message,
+            )
+            return
         QMessageBox.critical(
             self,
             "Programming Autograding Failed",
@@ -1884,6 +1915,7 @@ class RubricGrader(QMainWindow):
         self._autograding_workers.pop(request_id, None)
         if not self._autograding_workers:
             self._set_autograding_actions_busy(False)
+        self._refresh_programming_workspace()
 
     def grade_all_programming_submissions(self):
         service = self._ensure_autograding_service(allow_prompt=True)
@@ -1957,6 +1989,275 @@ class RubricGrader(QMainWindow):
             dialog.exec_()
         finally:
             self._autograding_batch_dialog = None
+            self._refresh_programming_workspace()
+
+    def check_programming_runtime(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return
+        assessment_id = self._canonical_assessment_id()
+        image = self._autograding_runtime_image(assessment_id)
+        worker = AutogradingWorker(
+            service,
+            AutogradingOperation.CHECK_RUNTIME,
+            parameters={"image": image},
+        )
+        self._autograding_workers[worker.request_id] = worker
+        worker.signals.started.connect(self._on_autograding_worker_started)
+        worker.signals.completed.connect(self._on_autograding_worker_completed)
+        worker.signals.failed.connect(self._on_autograding_worker_failed)
+        worker.signals.finished.connect(self._on_autograding_worker_finished)
+        self._set_autograding_actions_busy(True)
+        self.submission_thread_pool.start(worker)
+
+    def view_latest_programming_result(self):
+        service = self._ensure_autograding_service(allow_prompt=True)
+        if service is None:
+            return
+        assessment_id = self._canonical_assessment_id()
+        student_id = self._current_autograding_student_id()
+        if not student_id:
+            QMessageBox.warning(
+                self,
+                "No Current Student",
+                "Select a student before viewing programming-autograding results.",
+            )
+            return
+        history = service.list_history(assessment_id, student_id)
+        if not history:
+            QMessageBox.information(
+                self,
+                "No Autograding History",
+                "This student does not have a programming-autograding run yet.",
+            )
+            return
+        stored = service.load_run(assessment_id, student_id, history[-1].run_id)
+        AutogradingResultsDialog(stored, parent=self).exec_()
+
+    def _on_programming_student_selected(self, student_id):
+        self._refresh_programming_selected_result(student_id)
+
+    @staticmethod
+    def _format_programming_timestamp(value):
+        text = str(value or "").strip()
+        if not text:
+            return "—"
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return text
+        return parsed.astimezone().strftime("%b %d, %Y %I:%M %p")
+
+    @staticmethod
+    def _programming_run_status(reference):
+        if bool(getattr(reference, "requires_review", False)):
+            return "Review"
+        status = str(getattr(reference, "status", "") or "").strip()
+        if status in ("completed", "completed_with_failures"):
+            return "Completed"
+        if not status:
+            return "Completed"
+        return status.replace("_", " ").title()
+
+    @staticmethod
+    def _programming_score_text(reference):
+        final_score = getattr(reference, "final_score", None)
+        max_score = getattr(reference, "max_score", None)
+        if final_score is None or max_score is None:
+            return "—"
+        return "%g / %g" % (final_score, max_score)
+
+    def _programming_records(self):
+        records = list(self.student_records or self.roster_records or ())
+        unique = []
+        seen = set()
+        for record in records:
+            student_id = str(getattr(record, "student_id", "") or "").strip()
+            if not student_id or student_id in seen:
+                continue
+            seen.add(student_id)
+            unique.append(record)
+        return unique
+
+    def _programming_repository_without_prompt(self):
+        repository = self.submission_controller.submission_repository
+        if repository is not None:
+            return repository
+        if not self.assessments_dir:
+            return None
+        self._configure_submission_evidence_root()
+        evidence_root = self.submission_controller.evidence_root
+        if not evidence_root:
+            return None
+        repository = SubmissionRepository(evidence_root, create=True)
+        self.submission_controller.set_submission_repository(repository)
+        return repository
+
+    @staticmethod
+    def _latest_programming_reference_for_submission(history, submission):
+        refs = tuple(history or ())
+        if submission is None:
+            return refs[-1] if refs else None
+        submission_id = str(getattr(submission, "submission_id", "") or "").strip()
+        if not submission_id:
+            return None
+        matching = [
+            ref
+            for ref in refs
+            if str(getattr(ref, "submission_id", "") or "").strip() == submission_id
+        ]
+        return matching[-1] if matching else None
+
+    def _refresh_programming_workspace(self, selected_student_id=None):
+        workspace = self.programming_workspace
+        if workspace is None:
+            return
+
+        assessment_id = self._canonical_assessment_id()
+        rubric = self.rubric_data or {}
+        assessment_name = (
+            rubric.get("assignment_name")
+            or rubric.get("title")
+            or self.assignment_name
+            or assessment_id
+        )
+        bundle_id = (
+            self._selected_autograding_bundle_id(assessment_id)
+            if assessment_id
+            else None
+        )
+        runtime_image = (
+            self._autograding_runtime_image(assessment_id)
+            if assessment_id
+            else DEFAULT_DOCKER_PYTEST_IMAGE
+        )
+        workspace.set_context(
+            assessment_name=assessment_name,
+            assessment_id=assessment_id,
+            bundle_id=bundle_id,
+            runtime_image=runtime_image,
+        )
+
+        repository = self._programming_repository_without_prompt() if assessment_id else None
+        service = self._ensure_autograding_service(allow_prompt=False) if assessment_id else None
+        rows = []
+        for record in self._programming_records():
+            student_id = str(getattr(record, "student_id", "") or "").strip()
+            student_name = str(getattr(record, "student_name", "") or student_id)
+            submission = None
+            if repository is not None:
+                try:
+                    submission = repository.get_active_submission(assessment_id, student_id)
+                except Exception:
+                    submission = None
+            reference = None
+            if service is not None:
+                try:
+                    history = service.list_history(assessment_id, student_id)
+                    reference = self._latest_programming_reference_for_submission(
+                        history, submission
+                    )
+                except Exception:
+                    reference = None
+
+            if submission is None:
+                status = "No submission"
+                attempt = "—"
+            else:
+                attempt = getattr(submission, "attempt", None) or "—"
+                status = "Not graded"
+            score = "—"
+            last_run = "—"
+            if reference is not None:
+                status = self._programming_run_status(reference)
+                score = self._programming_score_text(reference)
+                last_run = self._format_programming_timestamp(reference.created_at)
+                if getattr(reference, "attempt", None) is not None:
+                    attempt = reference.attempt
+            rows.append(
+                {
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "attempt": attempt,
+                    "status": status,
+                    "score": score,
+                    "last_run": last_run,
+                }
+            )
+
+        workspace.set_rows(rows, selected_student_id=selected_student_id)
+        selected = workspace.selected_student_id()
+        self._refresh_programming_selected_result(selected)
+
+    def _refresh_programming_selected_result(self, student_id):
+        workspace = self.programming_workspace
+        if workspace is None:
+            return
+        student_id = str(student_id or "").strip()
+        if not student_id:
+            workspace.set_latest_result({})
+            return
+
+        assessment_id = self._canonical_assessment_id()
+        name = workspace.selected_student_name() or student_id
+        repository = self._programming_repository_without_prompt() if assessment_id else None
+        submission = None
+        if repository is not None:
+            try:
+                submission = repository.get_active_submission(assessment_id, student_id)
+            except Exception:
+                submission = None
+
+        detail = {
+            "student_name": name,
+            "has_submission": submission is not None,
+            "attempt": getattr(submission, "attempt", None) if submission is not None else None,
+            "has_run": False,
+        }
+        service = self._ensure_autograding_service(allow_prompt=False) if assessment_id else None
+        if service is None:
+            workspace.set_latest_result(detail)
+            return
+        try:
+            history = service.list_history(assessment_id, student_id)
+        except Exception:
+            history = ()
+        reference = self._latest_programming_reference_for_submission(
+            history, submission
+        )
+        if reference is None:
+            workspace.set_latest_result(detail)
+            return
+
+        detail.update(
+            {
+                "has_run": True,
+                "status": self._programming_run_status(reference),
+                "score": self._programming_score_text(reference),
+                "attempt": getattr(reference, "attempt", None) or detail.get("attempt"),
+                "last_run": self._format_programming_timestamp(reference.created_at),
+            }
+        )
+        try:
+            stored = service.load_run(assessment_id, student_id, reference.run_id)
+            results = tuple(stored.pytest_result.test_results or ())
+            public = [item for item in results if item.visibility == "public"]
+            hidden = [item for item in results if item.visibility == "hidden"]
+            public_passed = sum(1 for item in public if item.status == "passed")
+            hidden_passed = sum(1 for item in hidden if item.status == "passed")
+            passed = sum(1 for item in results if item.status == "passed")
+            not_passed = max(0, len(results) - passed)
+            detail.update(
+                {
+                    "public_tests": "%d / %d" % (public_passed, len(public)),
+                    "hidden_tests": "%d / %d" % (hidden_passed, len(hidden)),
+                    "test_summary": "%d passed • %d not passed"
+                    % (passed, not_passed),
+                }
+            )
+        except Exception:
+            pass
+        workspace.set_latest_result(detail)
 
     def show_autograding_history(self):
         service = self._ensure_autograding_service(allow_prompt=True)

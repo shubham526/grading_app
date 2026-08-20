@@ -10,13 +10,17 @@ class TestAutogradingUISource(unittest.TestCase):
     def _source(self, relative):
         return (ROOT / relative).read_text(encoding="utf-8")
 
-    def test_main_window_contains_programming_autograding_tools_menu(self):
-        text = self._source("ui/main_window.py")
-        self.assertIn('QMenu("Programming Autograding", self)', text)
-        self.assertIn('"Configure Autograder…"', text)
-        self.assertIn('"Grade Current Submission"', text)
-        self.assertIn('"Grade All Active Submissions…"', text)
-        self.assertIn('"Autograding History…"', text)
+    def test_programming_autograding_capabilities_remain_wired_after_mode_split(self):
+        main = self._source("ui/main_window.py")
+        workspace = self._source("ui/workspaces/programming_grading_workspace.py")
+        self.assertIn("def show_autograding_setup", main)
+        self.assertIn("def grade_current_programming_submission", main)
+        self.assertIn("def grade_all_programming_submissions", main)
+        self.assertIn("def show_autograding_history", main)
+        self.assertIn('"Configure Autograder"', workspace)
+        self.assertIn('"Grade Selected"', workspace)
+        self.assertIn('"Grade All"', workspace)
+        self.assertIn('"Run History"', workspace)
 
     def test_current_grade_runs_in_worker_not_directly_on_gui_thread(self):
         text = self._source("ui/main_window.py")

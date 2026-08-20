@@ -14,7 +14,7 @@ else:
     _IMPORT_ERROR = None
     from src.ui.main_window import RubricGrader
     from src.ui.modes.grading_mode import GradingMode
-    from src.ui.workspaces import WrittenGradingWorkspace
+    from src.ui.workspaces import ProgrammingGradingWorkspace, WrittenGradingWorkspace
 
 
 @unittest.skipIf(
@@ -70,11 +70,15 @@ class TestGradingModeShellV2341(unittest.TestCase):
         self.assertIs(self.window.submission_workspace, submission_workspace)
         self.assertIs(self.window.workflow_mode_combo, workflow_combo)
 
-    def test_programming_mode_routes_to_independent_placeholder(self):
+    def test_programming_mode_routes_to_independent_dashboard(self):
         self.window.set_grading_mode("programming")
         self.assertIs(
             self.window.current_grading_mode,
             GradingMode.PROGRAMMING,
+        )
+        self.assertIsInstance(
+            self.window.programming_workspace,
+            ProgrammingGradingWorkspace,
         )
         self.assertIs(
             self.window.active_grading_workspace(),
@@ -84,6 +88,16 @@ class TestGradingModeShellV2341(unittest.TestCase):
             self.window.programming_workspace,
             self.window.written_workspace,
         )
+        self.assertEqual(
+            self.window.programming_workspace.configure_button.text(),
+            "Configure Autograder",
+        )
+
+    def test_written_tools_menu_no_longer_contains_programming_autograding(self):
+        texts = [action.text() for action in self.window.tools_menu_button.menu().actions()]
+        self.assertNotIn("Programming Autograding", texts)
+        self.assertIn("Submission Similarity Review", texts)
+        self.assertIn("Submission History", texts)
 
     def test_file_menu_exposes_switch_grading_mode(self):
         self.assertEqual(

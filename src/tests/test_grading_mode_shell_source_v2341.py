@@ -7,9 +7,7 @@ import unittest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _MAIN_WINDOW = _ROOT / "ui" / "main_window.py"
-_PROGRAMMING_PLACEHOLDER = (
-    _ROOT / "ui/workspaces/programming_grading_workspace.py"
-)
+_PROGRAMMING_WORKSPACE = _ROOT / "ui/workspaces/programming_grading_workspace.py"
 _WRITTEN_WORKSPACE = _ROOT / "ui/workspaces/written_grading_workspace.py"
 
 
@@ -29,12 +27,14 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
         self.assertIn("QStackedWidget", source)
         self.assertIn("Switch Grading Mode…", source)
 
-    def test_commit1_programming_page_is_still_presentation_only(self):
-        source = _PROGRAMMING_PLACEHOLDER.read_text(encoding="utf-8")
+    def test_programming_workspace_is_presentation_and_intent_only(self):
+        source = _PROGRAMMING_WORKSPACE.read_text(encoding="utf-8")
+        self.assertIn("class ProgrammingGradingWorkspace", source)
+        self.assertIn("student_selected = pyqtSignal(str)", source)
         self.assertNotIn("DockerPytestExecutionBackend", source)
         self.assertNotIn("AutogradingService", source)
-        self.assertNotIn("grade_submission", source)
-        self.assertIn("Commit 3", source)
+        self.assertNotIn("SubmissionRepository", source)
+        self.assertNotIn("grade_submission(", source)
 
     def test_final_v233_written_root_is_preserved_inside_written_workspace(self):
         source = _MAIN_WINDOW.read_text(encoding="utf-8")
@@ -50,22 +50,25 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
             source,
         )
 
-    def test_final_v233_programming_wiring_is_still_present(self):
+    def test_v233_autograding_backend_wiring_remains_but_written_menu_is_removed(self):
         source = _MAIN_WINDOW.read_text(encoding="utf-8")
-        self.assertIn('QMenu("Programming Autograding", self)', source)
-        self.assertIn('"Configure Autograder…"', source)
-        self.assertIn('"Grade Current Submission"', source)
-        self.assertIn('"Grade All Active Submissions…"', source)
-        self.assertIn('"Autograding History…"', source)
+        self.assertNotIn('QMenu("Programming Autograding", self)', source)
         self.assertIn("AutogradingWorker(", source)
+        self.assertIn("def show_autograding_setup", source)
+        self.assertIn("def grade_current_programming_submission", source)
+        self.assertIn("def grade_all_programming_submissions", source)
+        self.assertIn("def show_autograding_history", source)
+        self.assertIn("def view_latest_programming_result", source)
+        self.assertIn("def check_programming_runtime", source)
 
     def test_python39_grammar(self):
         paths = [
             _MAIN_WINDOW,
             _ROOT / "ui/modes/grading_mode.py",
             _ROOT / "ui/modes/mode_selection_page.py",
-            _PROGRAMMING_PLACEHOLDER,
+            _PROGRAMMING_WORKSPACE,
             _WRITTEN_WORKSPACE,
+            _ROOT / "ui/workers/autograding_worker.py",
         ]
         for path in paths:
             ast.parse(

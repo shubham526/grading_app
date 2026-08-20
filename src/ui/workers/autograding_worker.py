@@ -15,6 +15,7 @@ from src.autograding.service import AutogradingService
 class AutogradingOperation(str, Enum):
     GRADE_ONE = "grade_one"
     GRADE_BATCH = "grade_batch"
+    CHECK_RUNTIME = "check_runtime"
 
 
 def new_autograding_request_id() -> str:
@@ -31,7 +32,7 @@ class AutogradingWorkerSignals(QObject):
 
 
 class AutogradingWorker(QRunnable):
-    """Run one current-submission or batch autograding operation off the GUI thread.
+    """Run grading or runtime-availability work off the GUI thread.
 
     Cancellation is cooperative.  A batch stops before the next student; the
     currently running Docker container is allowed to reach its configured
@@ -81,9 +82,14 @@ class AutogradingWorker(QRunnable):
                 return
             if self.operation == AutogradingOperation.GRADE_ONE:
                 payload = self._grade_one()
-            else:
+            elif self.operation == AutogradingOperation.GRADE_BATCH:
                 payload = self._grade_batch()
-            if self.is_cancelled and self.operation == AutogradingOperation.GRADE_ONE:
+            else:
+                payload = self._check_runtime()
+            if self.is_cancelled and self.operation in (
+                AutogradingOperation.GRADE_ONE,
+                AutogradingOperation.CHECK_RUNTIME,
+            ):
                 self.signals.cancelled.emit(self.request_id, op)
                 return
             self.signals.completed.emit(self.request_id, op, payload)
@@ -110,6 +116,9 @@ class AutogradingWorker(QRunnable):
             image=self.parameters.get("image"),
             metadata=self.parameters.get("metadata"),
         )
+
+    def _check_runtime(self):
+        return self.service.runtime_availability(self.parameters.get("image"))
 
     def _grade_batch(self):
         required = ("assessment_id", "student_ids", "bundle_id")
