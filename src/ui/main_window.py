@@ -84,8 +84,8 @@ from src.ui.workers.autograding_worker import (
     AutogradingWorker,
 )
 from src.ui.modes import GradingMode
-from src.ui.modes.mode_selection_page import ModeSelectionPage
 from src.ui.workspaces import (
+    AssessmentHomeWorkspace,
     ProgrammingGradingWorkspace,
     WrittenGradingWorkspace,
 )
@@ -189,6 +189,7 @@ class RubricGrader(QMainWindow):
         self._changing_question_combo = False
         self._changing_student_combo = False
         self._restoring_grading_session = False
+        self._suppress_resume_offer = False
         self._resume_checkpoint_prompted_for = set()
 
         self.student_name = ""
@@ -220,8 +221,8 @@ class RubricGrader(QMainWindow):
         self._autograding_batch_dialog = None
 
         # v2.3.4.1 explicit top-level workflow state. ``None`` means that the
-        # startup/mode-selection page is visible. Assignment type is never
-        # inferred from a file extension.
+        # shared Assessment Home is visible. Assignment type is never inferred
+        # from a file extension.
         self.current_grading_mode = None
         # ``_written_central_widget`` remains as a compatibility alias to
         # the exact pre-v2.3.4 written root. Commit 2 places that root
@@ -230,6 +231,9 @@ class RubricGrader(QMainWindow):
         self._written_central_widget = None
         self.written_workspace = None
         self._mode_stack = None
+        self.assessment_home_workspace = None
+        # Compatibility alias retained for Commit-1/2 callers. The old bare
+        # mode chooser is replaced by Assessment Home in Commit 4.
         self.mode_selection_page = None
         self.programming_workspace = None
 
@@ -319,6 +323,7 @@ class RubricGrader(QMainWindow):
         toolbar_layout.addStretch(1)
 
         setup_menu = QMenu(self)
+        self.setup_menu = setup_menu
         self.load_assessment_folder_action = QAction(
             qta.icon('fa5s.folder'), "Choose Workspace…", self
         )
@@ -895,12 +900,11 @@ class RubricGrader(QMainWindow):
     # ------------------------------------------------------------------
 
     def _install_grading_mode_shell(self):
-        """Wrap the exact v2.3.3 written UI in an explicit workspace host.
+        """Install Assessment Home plus the two mode-specific workspaces.
 
-        The shell does not rebuild or relocate the written grading controls. The already-constructed v2.3.3 central widget is detached as
-        one intact QWidget and inserted into the mode stack. Its child widgets,
-        signals, splitters, controller references, and grading state remain the
-        same objects.
+        The already-constructed written grader remains one intact legacy root
+        inside ``WrittenGradingWorkspace``. Shared setup is presented separately
+        on Assessment Home; mode-specific controls remain in their workspaces.
         """
 
         written_widget = self.takeCentralWidget()
@@ -909,18 +913,30 @@ class RubricGrader(QMainWindow):
 
         self._written_central_widget = written_widget
         self.written_workspace = WrittenGradingWorkspace(written_widget, self)
-
-        self.mode_selection_page = ModeSelectionPage(self)
+        self.assessment_home_workspace = AssessmentHomeWorkspace(self)
+        # Backward-compatible name for code/tests that still refer to the old
+        # first-page chooser. It now points at the richer Assessment Home.
+        self.mode_selection_page = self.assessment_home_workspace
         self.programming_workspace = ProgrammingGradingWorkspace(self)
 
         self._mode_stack = QStackedWidget(self)
         self._mode_stack.setObjectName("gradingModeWorkspaceStack")
-        self._mode_stack.addWidget(self.mode_selection_page)
+        self._mode_stack.addWidget(self.assessment_home_workspace)
         self._mode_stack.addWidget(self.written_workspace)
         self._mode_stack.addWidget(self.programming_workspace)
         self.setCentralWidget(self._mode_stack)
 
-        self.mode_selection_page.mode_selected.connect(self.set_grading_mode)
+        self.assessment_home_workspace.load_rubric_requested.connect(
+            self._load_shared_rubric_from_home
+        )
+        self.assessment_home_workspace.load_roster_requested.connect(
+            self._load_shared_roster_from_home
+        )
+        self.assessment_home_workspace.choose_workspace_requested.connect(
+            self._choose_shared_workspace_from_home
+        )
+        self.assessment_home_workspace.mode_selected.connect(self.set_grading_mode)
+
         self.programming_workspace.configure_autograder_requested.connect(
             self.show_autograding_setup
         )
@@ -949,48 +965,193 @@ class RubricGrader(QMainWindow):
             self._on_programming_student_selected
         )
 
+        self._isolate_written_specific_setup_controls()
         self._install_grading_mode_menu()
-        self.show_grading_mode_selector()
+        self.show_assessment_home(force=True)
+
+    def _isolate_written_specific_setup_controls(self):
+        """Remove shared setup controls from the Written workspace toolbar."""
+
+        if hasattr(self, "load_btn"):
+            self.load_btn.setVisible(False)
+        setup_menu = getattr(self, "setup_menu", None)
+        if setup_menu is not None:
+            for action in (
+                getattr(self, "load_assessment_folder_action", None),
+                getattr(self, "load_roster_action", None),
+            ):
+                if action is not None:
+                    setup_menu.removeAction(action)
+        if hasattr(self, "setup_menu_button"):
+            self.setup_menu_button.setText("Written Setup")
+            self.setup_menu_button.setToolTip(
+                "Written-only setup such as reference solutions and PDF accommodations"
+            )
 
     def _install_grading_mode_menu(self):
-        """Install shared top-level navigation for switching grading modes."""
+        """Install navigation back to the shared Assessment Home."""
 
         self.file_menu = self.menuBar().addMenu("&File")
-        self.switch_grading_mode_action = QAction(
-            qta.icon("fa5s.exchange-alt"),
-            "Switch Grading Mode…",
+        self.assessment_home_action = QAction(
+            qta.icon("fa5s.home"),
+            "Assessment Home…",
             self,
         )
-        self.switch_grading_mode_action.setToolTip(
-            "Choose between Written / Text and Programming grading workspaces"
+        self.assessment_home_action.setToolTip(
+            "Return to shared assessment setup or switch grading mode"
         )
-        self.switch_grading_mode_action.triggered.connect(
-            self.show_grading_mode_selector
+        self.assessment_home_action.triggered.connect(self.show_assessment_home)
+        self.file_menu.addAction(self.assessment_home_action)
+        # Preserve the public attribute introduced in Commit 1 while changing
+        # the destination from a bare chooser to Assessment Home.
+        self.switch_grading_mode_action = self.assessment_home_action
+
+    def _shared_setup_context(self):
+        rubric = self.rubric_data or {}
+        rubric_path = str(self.rubric_file_path or "").strip()
+        roster_path = str(self.roster_file_path or "").strip()
+        workspace_path = str(self.assessments_dir or "").strip()
+        roster_count = len(self.roster_records or ())
+        return {
+            "rubric_ready": bool(rubric and rubric_path),
+            "rubric_path": rubric_path,
+            "rubric_title": str(rubric.get("title") or "").strip(),
+            "assessment_id": str(
+                rubric.get("assessment_id") or rubric.get("assignment_id") or ""
+            ).strip(),
+            "roster_ready": bool(self.roster_records and roster_path),
+            "roster_path": roster_path,
+            "roster_count": roster_count,
+            "workspace_ready": bool(
+                workspace_path and os.path.isdir(os.path.abspath(workspace_path))
+            ),
+            "workspace_path": workspace_path,
+        }
+
+    def _shared_setup_ready(self):
+        context = self._shared_setup_context()
+        return bool(
+            context["rubric_ready"]
+            and context["roster_ready"]
+            and context["workspace_ready"]
         )
-        self.file_menu.addAction(self.switch_grading_mode_action)
 
-    def show_grading_mode_selector(self, _checked=False):
-        """Show the workflow chooser without destroying either workspace state."""
+    def _refresh_assessment_home(self):
+        home = self.assessment_home_workspace
+        if home is not None:
+            home.set_context(self._shared_setup_context())
 
-        if self._mode_stack is None or self.mode_selection_page is None:
-            return
+    def _run_shared_setup_action(self, callback):
+        """Run common setup without triggering Written-only resume prompts."""
+
+        previous = self._suppress_resume_offer
+        self._suppress_resume_offer = True
+        try:
+            callback()
+        finally:
+            self._suppress_resume_offer = previous
+            self._refresh_assessment_home()
+
+    def _load_shared_rubric_from_home(self):
+        # Loading the common rubric should not launch the Written-only grading
+        # configuration dialog. That remains available inside Written Settings.
+        self._run_shared_setup_action(
+            lambda: self.load_rubric(show_config_on_load=False)
+        )
+
+    def _load_shared_roster_from_home(self):
+        self._run_shared_setup_action(self.load_roster)
+
+    def _choose_shared_workspace_from_home(self):
+        self._run_shared_setup_action(self.load_assessment_folder)
+
+    def _confirm_written_workspace_transition(self, action_text):
+        if self.workflow_mode == QUESTION_CENTRIC and self.question_mode_dirty:
+            return self._confirm_dirty_navigation(action_text)
+        if not self.student_mode_dirty:
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Assessment Changes",
+            "The current student's assessment has unsaved changes. "
+            "Save them before you {}?".format(action_text),
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if reply == QMessageBox.Save:
+            return self.save_assessment(show_success=False)
+        if reply == QMessageBox.Discard:
+            record = self._current_student_record()
+            if record is not None and self.rubric_data:
+                return self.load_student_mode_student(self.current_student_index)
+            self.student_mode_dirty = False
+            return True
+        return False
+
+    def _can_leave_current_grading_mode(self, action_text):
+        if self.current_grading_mode is GradingMode.WRITTEN:
+            return self._confirm_written_workspace_transition(action_text)
+        if self.current_grading_mode is GradingMode.PROGRAMMING:
+            if self._autograding_workers or self._autograding_batch_dialog is not None:
+                QMessageBox.information(
+                    self,
+                    "Programming Grading In Progress",
+                    "Wait for the current programming grading/runtime operation to finish "
+                    "before leaving the Programming workspace.",
+                )
+                return False
+        return True
+
+    def show_assessment_home(self, _checked=False, force=False):
+        """Return to shared setup without destroying either grading workspace."""
+
+        if self._mode_stack is None or self.assessment_home_workspace is None:
+            return False
+        if not force and not self._can_leave_current_grading_mode(
+            "return to Assessment Home"
+        ):
+            return False
         self.current_grading_mode = None
-        self._mode_stack.setCurrentWidget(self.mode_selection_page)
+        self._refresh_assessment_home()
+        self._mode_stack.setCurrentWidget(self.assessment_home_workspace)
         self.setWindowTitle(_BASE_WINDOW_TITLE)
         if hasattr(self, "status_bar"):
-            self.status_bar.set_status("Choose a grading mode")
+            if self._shared_setup_ready():
+                self.status_bar.set_status("Assessment setup ready — choose a grading mode")
+            else:
+                self.status_bar.set_status("Complete shared assessment setup")
+        return True
+
+    def show_grading_mode_selector(self, _checked=False):
+        """Compatibility alias for the Commit-1/2 mode chooser entry point."""
+
+        return self.show_assessment_home(_checked=_checked)
 
     def set_grading_mode(self, mode):
-        """Activate a top-level grading workspace.
-
-        Shared assessment, roster, canonical submission, existing written
-        grading, and v2.3.3 autograding state
-        remain owned by this window and are not reset by a mode change.
-        """
+        """Activate Written or Programming using the shared assessment context."""
 
         mode = GradingMode.coerce(mode)
         if self._mode_stack is None:
             raise RuntimeError("Grading mode shell is not initialized")
+
+        if not self._shared_setup_ready():
+            self._refresh_assessment_home()
+            self._mode_stack.setCurrentWidget(self.assessment_home_workspace)
+            QMessageBox.information(
+                self,
+                "Complete Shared Setup",
+                "Load a rubric, load a roster, and choose a Grades + Evidence workspace "
+                "before opening a grading mode.",
+            )
+            return False
+
+        if (
+            self.current_grading_mode is not None
+            and self.current_grading_mode is not mode
+            and not self._can_leave_current_grading_mode("switch grading modes")
+        ):
+            return False
 
         if mode is GradingMode.WRITTEN:
             target = self.written_workspace
@@ -1004,13 +1165,14 @@ class RubricGrader(QMainWindow):
         self._mode_stack.setCurrentWidget(target)
         if mode is GradingMode.PROGRAMMING:
             self._refresh_programming_workspace()
-        self.setWindowTitle(
-            "{} — {}".format(_BASE_WINDOW_TITLE, mode.display_name)
-        )
+        else:
+            # Resume is a Written-specific workflow and therefore belongs after
+            # entering Written, not while configuring shared Assessment Home.
+            self._maybe_offer_resume_grading_session()
+        self.setWindowTitle("{} — {}".format(_BASE_WINDOW_TITLE, mode.display_name))
         if hasattr(self, "status_bar"):
-            self.status_bar.set_status(
-                "{} grading mode".format(mode.display_name)
-            )
+            self.status_bar.set_status("{} grading mode".format(mode.display_name))
+        return True
 
     def active_grading_workspace(self):
         """Return the currently visible shell page."""
@@ -3019,6 +3181,8 @@ class RubricGrader(QMainWindow):
             self._restoring_grading_session = False
 
     def _maybe_offer_resume_grading_session(self, allow_without_roster=False):
+        if self._suppress_resume_offer:
+            return False
         if self._restoring_grading_session:
             return False
         if not allow_without_roster and not self.roster_records:

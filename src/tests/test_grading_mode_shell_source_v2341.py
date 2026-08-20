@@ -7,12 +7,13 @@ import unittest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _MAIN_WINDOW = _ROOT / "ui" / "main_window.py"
+_HOME_WORKSPACE = _ROOT / "ui/workspaces/assessment_home_workspace.py"
 _PROGRAMMING_WORKSPACE = _ROOT / "ui/workspaces/programming_grading_workspace.py"
 _WRITTEN_WORKSPACE = _ROOT / "ui/workspaces/written_grading_workspace.py"
 
 
 class TestGradingModeShellSourceV2341(unittest.TestCase):
-    def test_main_window_uses_workspace_stack_and_explicit_mode_methods(self):
+    def test_main_window_uses_home_workspace_stack_and_explicit_mode_methods(self):
         source = _MAIN_WINDOW.read_text(encoding="utf-8")
         tree = ast.parse(source)
         methods = {
@@ -21,11 +22,14 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
         self.assertIn("_install_grading_mode_shell", methods)
+        self.assertIn("show_assessment_home", methods)
         self.assertIn("show_grading_mode_selector", methods)
         self.assertIn("set_grading_mode", methods)
         self.assertIn("active_grading_workspace", methods)
         self.assertIn("QStackedWidget", source)
-        self.assertIn("Switch Grading Mode…", source)
+        self.assertIn("Assessment Home…", source)
+        self.assertIn("AssessmentHomeWorkspace", source)
+        self.assertNotIn("ModeSelectionPage(self)", source)
 
     def test_programming_workspace_is_presentation_and_intent_only(self):
         source = _PROGRAMMING_WORKSPACE.read_text(encoding="utf-8")
@@ -50,6 +54,13 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
             source,
         )
 
+    def test_shared_setup_is_removed_from_written_toolbar(self):
+        source = _MAIN_WINDOW.read_text(encoding="utf-8")
+        self.assertIn("def _isolate_written_specific_setup_controls", source)
+        self.assertIn("self.load_btn.setVisible(False)", source)
+        self.assertIn("setup_menu.removeAction(action)", source)
+        self.assertIn('self.setup_menu_button.setText("Written Setup")', source)
+
     def test_v233_autograding_backend_wiring_remains_but_written_menu_is_removed(self):
         source = _MAIN_WINDOW.read_text(encoding="utf-8")
         self.assertNotIn('QMenu("Programming Autograding", self)', source)
@@ -66,6 +77,7 @@ class TestGradingModeShellSourceV2341(unittest.TestCase):
             _MAIN_WINDOW,
             _ROOT / "ui/modes/grading_mode.py",
             _ROOT / "ui/modes/mode_selection_page.py",
+            _HOME_WORKSPACE,
             _PROGRAMMING_WORKSPACE,
             _WRITTEN_WORKSPACE,
             _ROOT / "ui/workers/autograding_worker.py",
