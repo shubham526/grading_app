@@ -1,8 +1,32 @@
-scipy
-numpy
-seaborn
-matplotlib
-openpyxl
-pandas
-PyQt5>=5.15.0
-reportlab>=3.6.0
+# Rubric Grading Tool
+# Python 3.13 environment
+#
+# Direct application/test dependencies only.
+# Do NOT replace this with a Python 3.9 `pip freeze` output.
+#
+# After this installs and the full test suite passes, create a reproducible
+# lock snapshot separately with:
+#   python -m pip freeze > requirements-lock-py313.txt
+
+# Desktop UI
+PyQt5==5.15.11
+QtAwesome>=1.4.2,<2
+
+# PDF / document handling
+PyMuPDF>=1.25,<2
+reportlab>=4.4.10,<5
+openpyxl==3.1.5
+
+# Scientific / analytics stack
+# NumPy 2.1+ is required for Python 3.13 support.
+numpy>=2.1.2,<3
+pandas>=2.2.3,<3
+scipy>=1.14.1,<2
+matplotlib>=3.9.4,<4
+seaborn==0.13.2
+
+# Advanced semantic similarity
+sentence-transformers>=5.6.1,<6
+
+# Development / test runner
+pytest==9.1.1

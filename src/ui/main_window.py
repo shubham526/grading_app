@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
     QLabel, QPushButton, QFileDialog, QScrollArea,
     QLineEdit, QMessageBox, QGroupBox, QInputDialog, QMenu, QToolButton,
     QFrame, QSplitter, QSplitterHandle, QDialog, QComboBox, QSizePolicy,
+    QStackedWidget,
 )
 from PyQt5.QtCore import Qt, QSettings, QThreadPool, QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices, QColor, QPainter
@@ -81,6 +82,9 @@ from src.ui.workers.autograding_worker import (
     AutogradingOperation,
     AutogradingWorker,
 )
+from src.ui.modes import GradingMode
+from src.ui.modes.mode_selection_page import ModeSelectionPage
+from src.ui.workspaces import ProgrammingGradingWorkspace
 from src.ui.workers.submission_worker import (
     SubmissionOperation,
     SubmissionWorker,
@@ -115,6 +119,8 @@ _UI_WORKSPACE_SPLITTER_KEY = "workspace_splitter_horizontal_v2"
 _UI_GRADING_SPLITTER_KEY = "grading_splitter"
 _UI_QUESTION_SUMMARY_COLLAPSED_KEY = "question_summary_collapsed"
 _UI_ATTEMPTED_QUESTIONS_VISIBLE_KEY = "attempted_questions_visible"
+
+_BASE_WINDOW_TITLE = "Rubric Grading Tool"
 
 
 class GripSplitterHandle(QSplitterHandle):
@@ -208,6 +214,16 @@ class RubricGrader(QMainWindow):
         self._autograding_service = None
         self._autograding_workers = {}
         self._autograding_batch_dialog = None
+
+        # v2.3.4.1 explicit top-level workflow state. ``None`` means that the
+        # startup/mode-selection page is visible. Assignment type is never
+        # inferred from a file extension.
+        self.current_grading_mode = None
+        self._written_central_widget = None
+        self._mode_stack = None
+        self.mode_selection_page = None
+        self.programming_workspace = None
+
         self.submission_inference_settings = load_submission_settings()
         self._submission_focus_mode = False
         self._workspace_sizes_before_focus = None
@@ -233,11 +249,12 @@ class RubricGrader(QMainWindow):
             "fixed_total": 50,
         }
 
-        self.setWindowTitle("Rubric Grading Tool")
+        self.setWindowTitle(_BASE_WINDOW_TITLE)
         self.setMinimumSize(900, 600)
         self.resize(1400, 900)
 
         self.init_ui()
+        self._install_grading_mode_shell()
         self._restore_ui_preferences()
         self.setup_auto_save()
 
@@ -910,6 +927,117 @@ class RubricGrader(QMainWindow):
         main_layout.addLayout(bottom_layout)
         self._update_submission_status()
 
+    # ------------------------------------------------------------------
+    # v2.3.4.1 dual-mode application shell
+    # ------------------------------------------------------------------
+
+    def _install_grading_mode_shell(self):
+        """Wrap the exact v2.3.3 written UI in an explicit workspace host.
+
+        Commit 1 deliberately does not rebuild or relocate the written grading
+        controls. The already-constructed v2.3.3 central widget is detached as
+        one intact QWidget and inserted into the mode stack. Its child widgets,
+        signals, splitters, controller references, and grading state remain the
+        same objects.
+        """
+
+        written_widget = self.takeCentralWidget()
+        if written_widget is None:
+            raise RuntimeError("Written grading UI was not constructed")
+
+        written_widget.setObjectName("writtenGradingWorkspaceLegacyRoot")
+        self._written_central_widget = written_widget
+
+        self.mode_selection_page = ModeSelectionPage(self)
+        self.programming_workspace = ProgrammingGradingWorkspace(self)
+
+        self._mode_stack = QStackedWidget(self)
+        self._mode_stack.setObjectName("gradingModeWorkspaceStack")
+        self._mode_stack.addWidget(self.mode_selection_page)
+        self._mode_stack.addWidget(self._written_central_widget)
+        self._mode_stack.addWidget(self.programming_workspace)
+        self.setCentralWidget(self._mode_stack)
+
+        self.mode_selection_page.mode_selected.connect(self.set_grading_mode)
+        self.programming_workspace.choose_mode_button.clicked.connect(
+            self.show_grading_mode_selector
+        )
+
+        self._install_grading_mode_menu()
+        self.show_grading_mode_selector()
+
+    def _install_grading_mode_menu(self):
+        """Install shared top-level navigation for switching grading modes."""
+
+        self.file_menu = self.menuBar().addMenu("&File")
+        self.switch_grading_mode_action = QAction(
+            qta.icon("fa5s.exchange-alt"),
+            "Switch Grading Mode…",
+            self,
+        )
+        self.switch_grading_mode_action.setToolTip(
+            "Choose between Written / Text and Programming grading workspaces"
+        )
+        self.switch_grading_mode_action.triggered.connect(
+            self.show_grading_mode_selector
+        )
+        self.file_menu.addAction(self.switch_grading_mode_action)
+
+    def show_grading_mode_selector(self, _checked=False):
+        """Show the workflow chooser without destroying either workspace state."""
+
+        if self._mode_stack is None or self.mode_selection_page is None:
+            return
+        self.current_grading_mode = None
+        self._mode_stack.setCurrentWidget(self.mode_selection_page)
+        self.setWindowTitle(_BASE_WINDOW_TITLE)
+        if hasattr(self, "status_bar"):
+            self.status_bar.set_status("Choose a grading mode")
+
+    def set_grading_mode(self, mode):
+        """Activate a top-level grading workspace.
+
+        Commit 1 changes presentation only. Shared assessment, roster, canonical
+        submission, existing written grading, and v2.3.3 autograding state
+        remain owned by this window and are not reset by a mode change.
+        """
+
+        mode = GradingMode.coerce(mode)
+        if self._mode_stack is None:
+            raise RuntimeError("Grading mode shell is not initialized")
+
+        if mode is GradingMode.WRITTEN:
+            target = self._written_central_widget
+        else:
+            target = self.programming_workspace
+
+        if target is None:
+            raise RuntimeError("Grading workspace is not initialized")
+
+        self.current_grading_mode = mode
+        self._mode_stack.setCurrentWidget(target)
+        self.setWindowTitle(
+            "{} — {}".format(_BASE_WINDOW_TITLE, mode.display_name)
+        )
+        if hasattr(self, "status_bar"):
+            self.status_bar.set_status(
+                "{} grading mode".format(mode.display_name)
+            )
+
+    def active_grading_workspace(self):
+        """Return the currently visible shell page."""
+
+        if self._mode_stack is None:
+            return None
+        return self._mode_stack.currentWidget()
+
+    def _written_central_layout(self):
+        """Return the original v2.3.3 written root layout after shell wrapping."""
+
+        if self._written_central_widget is None:
+            return None
+        return self._written_central_widget.layout()
+
     def _on_question_summary_collapsed_changed(self, collapsed):
         """Give the summary useful height immediately when the user shows it."""
         splitter = getattr(self, "main_splitter", None)
@@ -971,8 +1099,10 @@ class RubricGrader(QMainWindow):
             self._workspace_sizes_before_focus = None
             self._session_sizes_before_focus = None
 
-        self.centralWidget().layout().invalidate()
-        self.centralWidget().layout().activate()
+        central_layout = self._written_central_layout()
+        if central_layout is not None:
+            central_layout.invalidate()
+            central_layout.activate()
 
     def _workspace_context_text(self):
         student = self.student_name_edit.text().strip() if hasattr(self, "student_name_edit") else ""
@@ -2885,7 +3015,7 @@ class RubricGrader(QMainWindow):
 
         self._update_student_navigation_visibility()
         self.workflow_card.updateGeometry()
-        central_layout = self.centralWidget().layout() if self.centralWidget() else None
+        central_layout = self._written_central_layout()
         if central_layout is not None:
             central_layout.invalidate()
             central_layout.activate()
@@ -4180,3 +4310,4 @@ class RubricGrader(QMainWindow):
                 "Error",
                 f"Failed to open Master ABET Evidence export dialog:\n{str(e)}",
             )
+
