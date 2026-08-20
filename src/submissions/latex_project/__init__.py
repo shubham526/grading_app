@@ -1,15 +1,19 @@
 """Backend support for Overleaf / multi-file LaTeX project ingestion.
 
-v2.3.4.2 Commit 3 adds execution-free project discovery and deterministic
-root-document resolution on top of the safe archive/storage layer. Multi-file
-composition, canonical submission bridging, and Written-mode UI arrive in
-later commits.
+v2.3.4.2 Commit 4 extends the existing restricted LaTeX-to-PDF compiler to
+whole safely extracted Overleaf projects. Project discovery/root resolution
+remain separate from compilation; canonical submission bridging and Written-
+mode ZIP import UI arrive in later commits.
 """
 
 from .archive import (
     LatexArchiveExtractionSummary,
     compute_manifest_sha256,
     safe_extract_latex_project_zip,
+)
+from .compilation import (
+    LatexProjectCompilation,
+    compile_stored_latex_project_to_pdf,
 )
 from .discovery import (
     LatexProjectDiscovery,
@@ -57,6 +61,7 @@ from .storage import (
     ORIGINAL_DIRNAME,
     LatexProjectArchiveStore,
     StoredLatexProject,
+    verify_stored_latex_project,
 )
 
 
@@ -80,6 +85,7 @@ __all__ = list(_model_all) + [
     "LatexProjectArchiveError",
     "LatexProjectArchiveRejectedError",
     "LatexProjectArchiveStore",
+    "LatexProjectCompilation",
     "LatexProjectError",
     "LatexProjectIngestionConfig",
     "LatexProjectIntegrityError",
@@ -92,6 +98,7 @@ __all__ = list(_model_all) + [
     "ORIGINAL_DIRNAME",
     "StoredLatexProject",
     "UnsupportedLatexProjectSchemaError",
+    "compile_stored_latex_project_to_pdf",
     "compute_manifest_sha256",
     "discover_latex_project",
     "resolve_latex_project_root",
@@ -99,4 +106,5 @@ __all__ = list(_model_all) + [
     "load_latex_project_config",
     "safe_extract_latex_project_zip",
     "save_latex_project_config",
+    "verify_stored_latex_project",
 ]

@@ -88,6 +88,74 @@ def _ensure_no_symlink_chain(root, target):
                 "Symlink detected in persisted project tree: %s" % cursor
             )
 
+def verify_stored_latex_project(stored):
+    """Verify original ZIP, manifest, and extracted bytes before use."""
+    if not isinstance(stored, StoredLatexProject):
+        raise TypeError("stored must be StoredLatexProject")
+    project_dir = Path(stored.project_dir)
+    archive_path = Path(stored.original_archive_path)
+    extracted_root = Path(stored.extracted_root)
+    reject_symlink(project_dir, "LaTeX-project directory")
+    reject_symlink(archive_path, "stored ZIP archive")
+    reject_symlink(extracted_root, "extracted project root")
+    if not archive_path.exists() or not archive_path.is_file():
+        raise LatexProjectIntegrityError("Stored original ZIP is missing")
+    if not extracted_root.exists() or not extracted_root.is_dir():
+        raise LatexProjectIntegrityError("Stored extracted project is missing")
+
+    if archive_path.stat().st_size != stored.archive.archive_size_bytes:
+        raise LatexProjectIntegrityError("Stored ZIP size does not match provenance")
+    try:
+        archive_digest = compute_file_sha256(str(archive_path))
+    except (ValueError, OSError) as exc:
+        raise LatexProjectIntegrityError(str(exc)) from exc
+    if archive_digest != stored.archive.archive_sha256:
+        raise LatexProjectIntegrityError("Stored ZIP SHA-256 does not match provenance")
+
+    if stored.manifest.manifest_sha256 is None:
+        raise LatexProjectIntegrityError("Stored project manifest has no SHA-256")
+    if compute_manifest_sha256(stored.manifest) != stored.manifest.manifest_sha256:
+        raise LatexProjectIntegrityError("Stored project manifest SHA-256 is invalid")
+
+    expected = {item.relative_path: item for item in stored.manifest.files}
+    actual = set()
+    for path in extracted_root.rglob("*"):
+        _ensure_no_symlink_chain(extracted_root, path)
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise LatexProjectIntegrityError(
+                "Unexpected non-regular object in extracted project: %s" % path
+            )
+        relative = path.relative_to(extracted_root).as_posix()
+        actual.add(relative)
+
+    if actual != set(expected):
+        missing = sorted(set(expected) - actual)
+        extra = sorted(actual - set(expected))
+        raise LatexProjectIntegrityError(
+            "Extracted project file set does not match manifest "
+            "(missing=%r, extra=%r)" % (missing, extra)
+        )
+
+    for relative, item in expected.items():
+        target = extracted_root.joinpath(*PurePosixPath(relative).parts)
+        _ensure_no_symlink_chain(extracted_root, target)
+        if target.stat().st_size != item.size_bytes:
+            raise LatexProjectIntegrityError(
+                "Extracted file size does not match manifest: %s" % relative
+            )
+        try:
+            digest = compute_file_sha256(str(target))
+        except (ValueError, OSError) as exc:
+            raise LatexProjectIntegrityError(str(exc)) from exc
+        if digest != item.sha256:
+            raise LatexProjectIntegrityError(
+                "Extracted file SHA-256 does not match manifest: %s" % relative
+            )
+    return True
+
+
 
 class LatexProjectArchiveStore:
     """Filesystem-backed immutable store for original ZIP + extracted project.
@@ -270,70 +338,8 @@ class LatexProjectArchiveStore:
         return stored
 
     def verify(self, stored):
-        if not isinstance(stored, StoredLatexProject):
-            raise TypeError("stored must be StoredLatexProject")
-        project_dir = Path(stored.project_dir)
-        archive_path = Path(stored.original_archive_path)
-        extracted_root = Path(stored.extracted_root)
-        reject_symlink(project_dir, "LaTeX-project directory")
-        reject_symlink(archive_path, "stored ZIP archive")
-        reject_symlink(extracted_root, "extracted project root")
-        if not archive_path.exists() or not archive_path.is_file():
-            raise LatexProjectIntegrityError("Stored original ZIP is missing")
-        if not extracted_root.exists() or not extracted_root.is_dir():
-            raise LatexProjectIntegrityError("Stored extracted project is missing")
+        return verify_stored_latex_project(stored)
 
-        if archive_path.stat().st_size != stored.archive.archive_size_bytes:
-            raise LatexProjectIntegrityError("Stored ZIP size does not match provenance")
-        try:
-            archive_digest = compute_file_sha256(str(archive_path))
-        except (ValueError, OSError) as exc:
-            raise LatexProjectIntegrityError(str(exc)) from exc
-        if archive_digest != stored.archive.archive_sha256:
-            raise LatexProjectIntegrityError("Stored ZIP SHA-256 does not match provenance")
-
-        if stored.manifest.manifest_sha256 is None:
-            raise LatexProjectIntegrityError("Stored project manifest has no SHA-256")
-        if compute_manifest_sha256(stored.manifest) != stored.manifest.manifest_sha256:
-            raise LatexProjectIntegrityError("Stored project manifest SHA-256 is invalid")
-
-        expected = {item.relative_path: item for item in stored.manifest.files}
-        actual = set()
-        for path in extracted_root.rglob("*"):
-            _ensure_no_symlink_chain(extracted_root, path)
-            if path.is_dir():
-                continue
-            if not path.is_file():
-                raise LatexProjectIntegrityError(
-                    "Unexpected non-regular object in extracted project: %s" % path
-                )
-            relative = path.relative_to(extracted_root).as_posix()
-            actual.add(relative)
-
-        if actual != set(expected):
-            missing = sorted(set(expected) - actual)
-            extra = sorted(actual - set(expected))
-            raise LatexProjectIntegrityError(
-                "Extracted project file set does not match manifest "
-                "(missing=%r, extra=%r)" % (missing, extra)
-            )
-
-        for relative, item in expected.items():
-            target = extracted_root.joinpath(*PurePosixPath(relative).parts)
-            _ensure_no_symlink_chain(extracted_root, target)
-            if target.stat().st_size != item.size_bytes:
-                raise LatexProjectIntegrityError(
-                    "Extracted file size does not match manifest: %s" % relative
-                )
-            try:
-                digest = compute_file_sha256(str(target))
-            except (ValueError, OSError) as exc:
-                raise LatexProjectIntegrityError(str(exc)) from exc
-            if digest != item.sha256:
-                raise LatexProjectIntegrityError(
-                    "Extracted file SHA-256 does not match manifest: %s" % relative
-                )
-        return True
 
 
 __all__ = [
@@ -344,4 +350,5 @@ __all__ = [
     "ORIGINAL_ARCHIVE_FILENAME",
     "ORIGINAL_DIRNAME",
     "StoredLatexProject",
+    "verify_stored_latex_project",
 ]

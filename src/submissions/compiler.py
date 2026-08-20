@@ -17,8 +17,8 @@ import signal
 import subprocess
 import tempfile
 import time
-from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from pathlib import Path, PurePosixPath
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .models import CompilationResult
 
@@ -35,16 +35,75 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:keep] + marker
 
 
+def _normalize_allowed_relative_paths(values: Optional[Iterable[str]]) -> Optional[set]:
+    """Return normalized POSIX project-relative paths for an optional allowlist."""
+    if values is None:
+        return None
+    normalized = set()
+    for raw in values:
+        value = str(raw or "").strip().replace("\\", "/")
+        path = PurePosixPath(value)
+        parts = tuple(part for part in path.parts if part not in ("", "."))
+        if not parts or path.is_absolute() or any(part == ".." for part in parts):
+            raise ValueError("latex_source_allowlist_contains_unsafe_path")
+        normalized.add("/".join(parts))
+    return normalized
+
+
+def _reject_symlink_chain(source_root: Path, target: Path) -> None:
+    """Reject symlinked directories/files between source_root and target."""
+    source_root = source_root.absolute()
+    target = target.absolute()
+    try:
+        relative = target.relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError("latex_main_source_outside_source_root") from exc
+
+    cursor = source_root
+    if cursor.is_symlink():
+        raise ValueError("latex_source_root_is_symlink")
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise ValueError("latex_source_tree_contains_symlink")
+
+
 def _stage_source_tree(
     source_path: Path,
+    source_root: Path,
     workspace: Path,
     *,
     max_source_files: int,
     max_source_bytes: int,
     max_single_file_bytes: int,
-) -> Tuple[Path, List[str]]:
-    """Copy regular, non-symlink files from the submission root into workspace."""
-    source_root = source_path.parent.resolve()
+    allowed_relative_paths: Optional[Iterable[str]] = None,
+) -> Tuple[Path, Path, List[str]]:
+    """Copy bounded regular files from one source tree into a temp workspace.
+
+    ``source_root`` is the logical LaTeX project root.  For legacy single-file
+    submissions it is simply the directory containing ``source_path``.  For
+    Overleaf/project ZIP submissions it can be the safely extracted project
+    root, allowing a nested root document to compile with the complete project
+    tree available.
+
+    When ``allowed_relative_paths`` is provided, only those project-relative
+    regular files are staged.  The LaTeX-project ZIP pipeline uses the verified
+    immutable manifest as this allowlist so files injected after extraction are
+    never handed to TeX.
+    """
+    source_root = source_root.resolve()
+    source_path = source_path.resolve()
+    try:
+        main_relative = source_path.relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError("latex_main_source_outside_source_root") from exc
+    _reject_symlink_chain(source_root, source_path)
+
+    allowed = _normalize_allowed_relative_paths(allowed_relative_paths)
+    main_key = main_relative.as_posix()
+    if allowed is not None and main_key not in allowed:
+        raise ValueError("latex_main_source_not_in_allowlist")
+
     staged_root = workspace / "source"
     staged_root.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +111,7 @@ def _stage_source_tree(
     file_count = 0
     total_bytes = 0
 
-    for path in sorted(source_root.rglob("*"), key=lambda p: str(p).casefold()):
+    for path in sorted(source_root.rglob("*"), key=lambda item: str(item).casefold()):
         try:
             relative = path.relative_to(source_root)
         except ValueError:
@@ -61,12 +120,17 @@ def _stage_source_tree(
         if any(part in _DEFAULT_SKIPPED_DIRS for part in relative.parts):
             continue
 
+        key = relative.as_posix()
+        if allowed is not None and key not in allowed:
+            continue
+
         if path.is_symlink():
-            warnings.append(f"skipped_symlink:{relative.as_posix()}")
+            warnings.append(f"skipped_symlink:{key}")
             continue
         if not path.is_file():
             continue
 
+        _reject_symlink_chain(source_root, path)
         try:
             size = path.stat().st_size
         except OSError as exc:
@@ -77,7 +141,7 @@ def _stage_source_tree(
         if file_count > max_source_files:
             raise ValueError("latex_source_file_limit_exceeded")
         if size > max_single_file_bytes:
-            raise ValueError(f"latex_source_file_too_large:{relative.as_posix()}")
+            raise ValueError(f"latex_source_file_too_large:{key}")
         if total_bytes > max_source_bytes:
             raise ValueError("latex_source_total_size_exceeded")
 
@@ -85,10 +149,10 @@ def _stage_source_tree(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, destination)
 
-    staged_main = staged_root / source_path.name
+    staged_main = staged_root / main_relative
     if not staged_main.is_file():
         raise ValueError("latex_main_source_not_staged")
-    return staged_main, warnings
+    return staged_root, staged_main, warnings
 
 
 def _compiler_environment(workspace: Path, output_dir: Path) -> Dict[str, str]:
@@ -175,6 +239,8 @@ def compile_tex_to_pdf(
     path: str,
     *,
     output_dir: Optional[str] = None,
+    source_root: Optional[str] = None,
+    allowed_source_paths: Optional[Iterable[str]] = None,
     engine: str = "pdflatex",
     passes: int = 1,
     timeout_seconds: float = 30.0,
@@ -185,6 +251,11 @@ def compile_tex_to_pdf(
     max_log_chars: int = 200_000,
 ) -> CompilationResult:
     """Compile a .tex source to PDF in a restricted temporary workspace.
+
+    ``source_root`` defaults to the directory containing ``path`` so legacy
+    single-file submissions retain their existing behavior.  Project callers
+    may supply a larger verified source root plus ``allowed_source_paths`` to
+    stage an entire multi-file project without exposing unverified files.
 
     ``output_dir`` is recommended for durable artifacts.  When omitted, a
     dedicated temporary output directory is created and retained; callers may
@@ -202,6 +273,29 @@ def compile_tex_to_pdf(
         raise FileNotFoundError(str(source_path))
     if not source_path.is_file() or source_path.suffix.lower() != ".tex":
         raise ValueError(f"Expected a .tex file: {source_path}")
+
+    if source_root is None:
+        source_root_path = source_path.parent
+    else:
+        requested_root = Path(source_root).expanduser()
+        if requested_root.is_symlink():
+            raise ValueError(f"Symlinked LaTeX source roots are not accepted: {requested_root}")
+        source_root_path = requested_root.resolve()
+        if not source_root_path.exists() or not source_root_path.is_dir():
+            raise ValueError(f"Expected an existing LaTeX source root directory: {source_root_path}")
+    try:
+        main_relative = source_path.relative_to(source_root_path)
+    except ValueError as exc:
+        raise ValueError("latex_main_source_outside_source_root") from exc
+    _reject_symlink_chain(source_root_path, source_path)
+
+    normalized_allowed_paths = _normalize_allowed_relative_paths(allowed_source_paths)
+    if (
+        normalized_allowed_paths is not None
+        and main_relative.as_posix() not in normalized_allowed_paths
+    ):
+        raise ValueError("latex_main_source_not_in_allowlist")
+
     if engine not in ALLOWED_ENGINES:
         raise ValueError(f"Unsupported LaTeX engine {engine!r}; allowed: {', '.join(ALLOWED_ENGINES)}")
     if passes < 1 or passes > 3:
@@ -252,12 +346,14 @@ def compile_tex_to_pdf(
             compile_output.mkdir(parents=True, exist_ok=True)
 
             try:
-                staged_main, staging_warnings = _stage_source_tree(
+                staged_root, staged_main, staging_warnings = _stage_source_tree(
                     source_path,
+                    source_root_path,
                     workspace,
                     max_source_files=max_source_files,
                     max_source_bytes=max_source_bytes,
                     max_single_file_bytes=max_single_file_bytes,
+                    allowed_relative_paths=normalized_allowed_paths,
                 )
             except ValueError as exc:
                 error_code = str(exc).split(":", 1)[0]
@@ -283,13 +379,13 @@ def compile_tex_to_pdf(
                 "-no-shell-escape",
                 "-recorder",
                 f"-output-directory={compile_output}",
-                staged_main.name,
+                staged_main.relative_to(staged_root).as_posix(),
             ]
 
             for pass_index in range(passes):
                 return_code, stdout, stderr, timed_out = _run_tex_process(
                     command,
-                    cwd=staged_main.parent,
+                    cwd=staged_root,
                     env=env,
                     timeout_seconds=timeout_seconds,
                 )
