@@ -1,17 +1,19 @@
 # Programming Autograding — Instructor Guide
 
-This guide documents the v2.3.3 Python programming-autograding workflow.
+This guide documents the programming-autograding workflow as exposed by the
+v2.3.4.1 Programming dashboard. The underlying execution, scoring, persistence,
+and hidden-test protections remain the v2.3.3 subsystem.
 
 ## 1. Prerequisites
 
 Programming autograding requires:
 
-- a normal grading-app workspace with a stable assessment ID;
-- a loaded roster;
+- shared Assessment Home setup: rubric/assessment definition, roster, and
+  Grades + Evidence workspace;
 - canonical Python submissions imported through **Import Submissions**;
 - Docker Desktop / Docker Engine running;
 - the dedicated grading image built locally;
-- an instructor test bundle matching the assessment ID.
+- an instructor test bundle whose assessment ID matches the current assessment.
 
 Build the runtime once from the repository root:
 
@@ -31,7 +33,33 @@ docker run --rm --network none --pull=never \
 
 The expected pytest version is `9.1.1`.
 
-## 2. Instructor test-bundle format
+## 2. Open the Programming dashboard
+
+Launch the app and complete **Assessment Home**:
+
+1. **Load Rubric**.
+2. **Load Roster**.
+3. **Choose Workspace**.
+4. Click **Open Programming Grader**.
+
+You do not need to enter the Written workspace first.
+
+The dashboard contains:
+
+```text
+Configure Autograder
+Import Submissions
+Check Runtime
+Grade Selected
+Grade All
+Run History
+```
+
+The student table shows the active attempt, grading status, score, and last run.
+The Latest Result panel summarizes the selected student's current active
+attempt.
+
+## 3. Instructor test-bundle format
 
 A bundle has this shape:
 
@@ -45,7 +73,8 @@ my_autograder/
 └── requirements.txt      optional/preserved only
 ```
 
-`autograder.json` defines the assessment, entrypoint, required files, test IDs, public/hidden visibility, points, timeouts, and resource limits.
+`autograder.json` defines the assessment, entrypoint, required files, test IDs,
+public/hidden visibility, points, timeouts, and resource limits.
 
 Example:
 
@@ -80,13 +109,19 @@ Example:
 }
 ```
 
-The bundle is validated and copied immutably into the assessment workspace. Re-importing byte-identical grader content reuses the same bundle identity; changed grader bytes create a new immutable bundle version.
+The bundle is validated and copied immutably into the assessment workspace.
+Byte-identical grader content reuses the same bundle identity; changed grader
+bytes create a new immutable bundle version.
 
-## 3. Import programming submissions
+## 4. Import programming submissions
 
-Use the normal **Import Submissions** workflow. Python files are stored in the canonical v2.3.2 repository and remain immutable per attempt.
+Click **Import Submissions** in the Programming dashboard and use the canonical
+v2.3.2 import workflow. Python files are stored as immutable attempts with
+provenance.
 
-The autograder always grades one exact canonical attempt. By default the UI grades the active attempt. Historical attempts remain available as evidence and are never overwritten.
+The autograder grades one exact canonical attempt. The dashboard uses the active
+attempt by default. Historical attempts remain available and are never
+overwritten.
 
 For multi-file assignments, the grader config may require files such as:
 
@@ -96,48 +131,51 @@ helpers.py
 src/algorithm.py
 ```
 
-The execution plan verifies the configured entrypoint and required files before Docker is invoked.
+The execution plan verifies the configured entrypoint and required files before
+Docker is invoked.
 
-## 4. Configure the autograder
+A roster student with no active programming submission remains **No submission**
+and is not given a fabricated attempt.
 
-Open:
+## 5. Configure the autograder
 
-```text
-Tools → Programming Autograding → Configure Autograder…
-```
+Click **Configure Autograder**.
 
 For the current assessment:
 
 1. Import a test-bundle folder, or select an already imported immutable bundle.
-2. Confirm the selected bundle belongs to the current assessment.
+2. Confirm that the selected bundle belongs to the current assessment.
 3. Set the runtime image, normally:
 
    ```text
    grading-app-python312-pytest:9.1.1
    ```
 
-4. Click **Check Runtime**.
-5. Confirm the runtime reports available.
-6. Save/accept the configuration.
+4. Check the runtime if desired.
+5. Use/save the selected bundle.
 
-The app remembers the selected bundle ID and runtime image per assessment. It does not silently select a replacement if that immutable bundle later becomes missing or corrupt.
+The app remembers the selected bundle ID and runtime image per assessment. It
+does not silently select a replacement if the immutable bundle later becomes
+missing or corrupt.
 
-## 5. Grade the current submission
+## 6. Check Runtime
 
-Select the desired student in the normal grading workspace, then open:
+Click **Check Runtime** on the Programming dashboard.
 
-```text
-Tools → Programming Autograding → Grade Current Submission
-```
+The check runs through the existing background worker boundary so the GUI
+remains responsive. If the configured Docker runtime is unavailable, the app
+reports that state rather than falling back to host execution.
 
-Before execution, confirm the dialog shows the intended:
+## 7. Grade Selected
+
+Select a student row and click **Grade Selected**.
+
+Before execution, the existing confirmation flow identifies the intended:
 
 - student;
 - active canonical attempt;
 - grader bundle;
 - Docker runtime image.
-
-After confirmation, grading runs in a background worker so the GUI remains responsive.
 
 The service performs:
 
@@ -147,29 +185,32 @@ active canonical submission
 → structured Docker pytest run
 → deterministic scoring
 → immutable run persistence
-→ instructor results dialog
+→ instructor result
 ```
 
-## 6. Interpret the results dialog
+After completion, the dashboard refreshes the selected student's status, score,
+last run, and Latest Result panel.
 
-The instructor results dialog shows the overall score or review-required state plus individual test rows.
+## 8. Active-attempt behavior
 
-Typical columns include:
+Autograding history is bound to the exact submission ID/attempt that was graded.
+If a student imports a new active attempt after an older attempt was graded, the
+new row must show **Not graded** and no score until that new attempt is run.
 
-- test name;
-- public/hidden visibility;
-- status;
-- awarded / possible points;
-- runtime;
-- message.
+The previous attempt's score remains in history; it is not carried forward as
+if it belonged to the new code.
 
-Selecting a test may show instructor-only traceback and captured stdout/stderr.
+## 9. Interpret results
 
-Hidden tests are intentionally visible to the instructor. Do not copy the full instructor report directly into student feedback. Student-safe report builders redact hidden identities and diagnostics.
+The instructor result view includes the overall score/review state plus
+individual test outcomes. Hidden-test diagnostics may be visible to the
+instructor.
 
-## 7. Outcome and scoring semantics
+Student-safe report builders continue to redact hidden identities and
+instructor-only diagnostics. Do not copy an instructor report directly into
+student feedback.
 
-Default policy:
+Default scoring semantics remain:
 
 | Outcome | Default score behavior |
 | --- | --- |
@@ -185,61 +226,41 @@ Default policy:
 
 A grader or infrastructure failure does not silently become a student zero.
 
-If the run is structurally suspicious or review-required, the persisted run keeps `final_score = None` even when some test-level evidence is known.
+## 10. Run History, View Results, and Grade Again
 
-## 8. Manual rubric grades are separate
+Use **Run History** for the selected student to inspect immutable prior runs.
+The Latest Result panel also exposes **View Results**, **Grade Again**, and
+**View History** when applicable.
 
-v2.3.3 does **not** automatically write the programming-autograding score into the manual rubric criterion widgets or saved manual assessment score.
+Every rerun creates a distinct immutable run. Opening a historical run performs
+integrity verification before display.
 
-This is deliberate. Autograding evidence is persisted separately so an instructor can inspect it before any future explicit merge/publish workflow.
+## 11. Grade All
 
-## 9. Autograding history
+Click **Grade All** to start the existing batch workflow.
 
-Open:
-
-```text
-Tools → Programming Autograding → Autograding History…
-```
-
-History is scoped to the current assessment and student. Every rerun remains a separate immutable row.
-
-A historical run includes:
-
-- run ID;
-- submission ID and attempt;
-- grader bundle ID/hash;
-- runtime environment and image digest;
-- structured test results;
-- score/review state;
-- execution stdout/stderr evidence.
-
-Opening a historical run performs integrity verification before displaying it.
-
-## 10. Batch grading
-
-Open:
-
-```text
-Tools → Programming Autograding → Grade All Active Submissions…
-```
-
-The app first preflights the loaded roster. Students whose active canonical submissions do not satisfy the Python grader contract are skipped/ineligible rather than guessed or partially executed.
-
-The batch dialog then grades eligible students sequentially in a background worker and reports per-student status/score.
-
-One student's error does not abort the entire batch.
+The app preflights the loaded roster. Students whose active canonical
+submissions do not satisfy the Python grader contract are skipped/ineligible
+rather than guessed or partially executed. One student's error does not abort
+the entire batch.
 
 ### Cancellation
 
-Use **Cancel After Current Student**.
+Use **Cancel After Current Student** in the batch dialog. Cancellation remains
+cooperative: the current Docker job finishes or reaches its configured timeout,
+then no next student is started.
 
-Cancellation is cooperative: the currently running Docker job is allowed to complete or reach its configured timeout so verified cleanup still occurs. Remaining students are then marked cancelled and are not started.
+## 12. Manual rubric grades remain separate
 
-## 11. Security model
+Programming-autograding scores are persisted separately from manual Written
+rubric scoring. v2.3.4.1 does not automatically write an autograding score into
+manual rubric criterion widgets or a saved manual assessment score.
+
+## 13. Security model
 
 Student code never runs directly in the desktop app's Python process.
 
-The Docker backend uses:
+The Docker backend uses the existing controls, including:
 
 - no external network;
 - read-only root filesystem;
@@ -253,52 +274,14 @@ The Docker backend uses:
 - fresh ephemeral staging;
 - verified cleanup.
 
-There is no automatic fallback to host execution if Docker is unavailable.
+There is no automatic fallback to host execution if Docker is unavailable, and
+the Docker socket is not mounted into the student container.
 
-The app also does not mount the Docker socket into the student container.
+## 14. Switching modes safely
 
-## 12. Troubleshooting
+Use **File → Assessment Home…** to leave Programming or switch to Written.
 
-### Runtime unavailable
-
-Check:
-
-```bash
-docker version
-```
-
-Then verify the grading image:
-
-```bash
-docker image inspect grading-app-python312-pytest:9.1.1
-```
-
-If the image is absent, build it using the repository Dockerfile. The app does not auto-build or auto-pull it.
-
-### Wrong pytest version
-
-Verify:
-
-```bash
-docker run --rm --network none --pull=never \
-  grading-app-python312-pytest:9.1.1 \
-  python -c 'import pytest; print(pytest.__version__)'
-```
-
-The v2.3.3 runtime expects `9.1.1`.
-
-### No canonical programming submission
-
-Import the student's `.py` submission through **Import Submissions** and confirm an active canonical attempt exists in **Submission History**.
-
-### Required file missing
-
-Compare the active submission's canonical artifact list with `entrypoint` and `required_files` in `autograder.json`.
-
-### Requires review
-
-Open the results details. Review-required runs may indicate collection/selection problems, infrastructure errors, run-level timeout, skipped/unresolved tests, or other structural issues. Do not convert these automatically to zero.
-
-### Batch student skipped
-
-The roster student either has no active canonical submission or the active submission does not satisfy the selected grader's programming file contract.
+If a programming grading/runtime worker or batch operation is still active, the
+app blocks the transition until the operation finishes. Shared assessment,
+roster, workspace, submission history, and autograding history remain available
+when you return.
