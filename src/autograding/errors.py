@@ -1,7 +1,7 @@
 """Error hierarchy for v2.3.3 programming autograding.
 
-The autograding package keeps domain/configuration failures distinct from
-execution failures introduced by later commits.  Validation errors inherit from
+The autograding package keeps domain/configuration and instructor-bundle failures
+distinct from execution failures introduced by later commits. Validation errors inherit from
 ``ValueError`` so callers may handle them alongside ordinary schema errors,
 while still being able to catch the autograding-specific base class.
 """
@@ -31,7 +31,27 @@ class UnsupportedAutogradingRunnerError(AutogradingValidationError):
     """Raised when a configuration names an unsupported test runner."""
 
 
+class AutogradingBundleError(AutogradingError):
+    """Base class for instructor test-bundle ingestion/storage failures."""
+
+
+class AutogradingBundleValidationError(AutogradingBundleError, AutogradingValidationError):
+    """Raised when a source test bundle violates the accepted static contract."""
+
+
+class AutogradingBundleIntegrityError(AutogradingBundleError, ValueError):
+    """Raised when committed bundle bytes/manifests fail integrity verification."""
+
+
+class AutogradingBundleStorageError(AutogradingBundleError):
+    """Raised when immutable bundle storage cannot complete safely."""
+
+
 __all__ = [
+    "AutogradingBundleError",
+    "AutogradingBundleIntegrityError",
+    "AutogradingBundleStorageError",
+    "AutogradingBundleValidationError",
     "AutogradingError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
