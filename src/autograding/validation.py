@@ -80,25 +80,63 @@ def normalize_bundle_relative_path(value, name="bundle path"):
     return "/".join(parts)
 
 
-def reject_symlink_chain(path, label="path"):
-    """Reject symlinks in any existing component of ``path``.
+def reject_symlink_chain(path, label="path", anchor=None):
+    """Reject symlinks at a trust boundary or inside an app-controlled tree.
 
-    ``Path.resolve`` follows ancestor symlinks, so checking only the final path
-    would be insufficient for a security boundary.  We walk the absolute path
-    component-by-component before callers resolve it.
+    A path selected by the user may legitimately live underneath an operating-
+    system symlink.  macOS is the important example: ``/var`` is a symlink to
+    ``/private/var``, and Python's temporary directories normally live below
+    ``/var/folders``.  Rejecting *every* ancestor symlink therefore rejects
+    ordinary, safe paths before the application reaches the selected directory.
+
+    With no ``anchor``, only the selected path itself is treated as the trust
+    boundary and rejected when that final component is a symlink.  Callers that
+    own a directory tree can pass ``anchor``; every component from that anchor
+    through ``path`` is then checked.  Symlinks above the anchor are deliberately
+    outside this helper's trust boundary.
     """
 
     requested = Path(path).expanduser()
-    try:
-        absolute = requested.absolute()
-    except OSError:
-        absolute = requested
 
-    current = Path(absolute.anchor) if absolute.anchor else Path()
-    for part in absolute.parts:
-        if part == absolute.anchor:
-            continue
-        current = current / part
+    if anchor is None:
+        try:
+            if requested.is_symlink():
+                raise AutogradingBundleValidationError(
+                    "Symlinked %s is not accepted: %s" % (label, requested)
+                )
+        except OSError as exc:
+            raise AutogradingBundleValidationError(
+                "Could not inspect %s %s: %s" % (label, requested, exc)
+            )
+        return
+
+    anchor_path = Path(anchor).expanduser()
+    try:
+        absolute_anchor = anchor_path.absolute()
+        absolute_requested = requested.absolute()
+    except OSError as exc:
+        raise AutogradingBundleValidationError(
+            "Could not inspect %s: %s" % (label, exc)
+        )
+
+    try:
+        relative = absolute_requested.relative_to(absolute_anchor)
+    except ValueError:
+        raise AutogradingBundleValidationError(
+            "%s is outside the trusted path boundary: %s"
+            % (label.capitalize(), absolute_anchor)
+        )
+
+    current = absolute_anchor
+    components = (current,)
+    if relative.parts:
+        built = []
+        for part in relative.parts:
+            current = current / part
+            built.append(current)
+        components = (absolute_anchor,) + tuple(built)
+
+    for current in components:
         try:
             if current.is_symlink():
                 raise AutogradingBundleValidationError(

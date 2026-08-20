@@ -163,6 +163,10 @@ class TestBundleStore:
     def _load_index(self, assessment_id, allow_missing=True):
         assessment_id = _required_text(assessment_id, "assessment_id")
         path = self._index_path(assessment_id)
+        try:
+            reject_symlink_chain(path, "test bundle index", anchor=self._root)
+        except AutogradingBundleValidationError as exc:
+            raise AutogradingBundleIntegrityError(str(exc))
         if not path.exists():
             if allow_missing:
                 return self._default_index(assessment_id)
@@ -239,6 +243,10 @@ class TestBundleStore:
 
     def _load_manifest(self, assessment_id, bundle_id):
         path = self._manifest_path(assessment_id, bundle_id)
+        try:
+            reject_symlink_chain(path, "test bundle manifest", anchor=self._root)
+        except AutogradingBundleValidationError as exc:
+            raise AutogradingBundleIntegrityError(str(exc))
         if not path.exists():
             raise FileNotFoundError(str(path))
         manifest = read_json_object(path)
@@ -286,7 +294,11 @@ class TestBundleStore:
             raise TypeError("bundle must be a StoredTestBundle")
         bundle_dir = Path(bundle.bundle_dir)
         try:
-            reject_symlink_chain(bundle_dir, "stored test bundle")
+            reject_symlink_chain(
+                bundle_dir,
+                "stored test bundle",
+                anchor=self._root,
+            )
         except AutogradingBundleValidationError as exc:
             raise AutogradingBundleIntegrityError(str(exc))
         if bundle_dir.is_symlink() or not bundle_dir.is_dir():
@@ -328,7 +340,11 @@ class TestBundleStore:
                 )
             stored_path = bundle_dir / item.stored_relative_path
             try:
-                reject_symlink_chain(stored_path, "stored bundle file")
+                reject_symlink_chain(
+                    stored_path,
+                    "stored bundle file",
+                    anchor=bundle_dir,
+                )
             except AutogradingBundleValidationError as exc:
                 raise AutogradingBundleIntegrityError(str(exc))
             if stored_path.is_symlink() or not stored_path.is_file():

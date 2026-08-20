@@ -81,11 +81,104 @@ class TestAutogradingBundleSecurity(unittest.TestCase):
             try:
                 lower.write_text("B", encoding="utf-8")
             except OSError:
-                self.skipTest("filesystem is case-insensitive")
-            if upper.resolve() == lower.resolve():
-                self.skipTest("filesystem is case-insensitive")
+                self.skipTest("filesystem does not permit case-distinct names")
+
+            # pathlib.resolve() may preserve the caller's lexical case on macOS
+            # even when APFS maps both names to the same inode. Ask the filesystem
+            # directly whether these are the same object before expecting two
+            # directory entries for the validator to compare.
+            try:
+                if os.path.samefile(str(upper), str(lower)):
+                    self.skipTest("filesystem is case-insensitive")
+            except OSError:
+                pass
+
             with self.assertRaisesRegex(AutogradingBundleValidationError, "collision"):
                 validate_test_bundle(root)
+
+
+    def test_external_ancestor_symlink_is_allowed_for_selected_bundle(self):
+        """OS/user path aliases above the selected root are not bundle symlinks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            real_parent = base / "real_parent"
+            real_parent.mkdir()
+            alias_parent = base / "alias_parent"
+            try:
+                alias_parent.symlink_to(real_parent, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+
+            root = self._bundle(alias_parent / "bundle")
+            bundle = validate_test_bundle(root)
+
+        self.assertEqual(bundle.assessment_id, "LAB1")
+        self.assertIn(
+            "tests/test_basic.py",
+            {item.relative_path for item in bundle.files},
+        )
+
+    def test_external_ancestor_symlink_is_allowed_for_workspace(self):
+        """A workspace reached through an external alias is resolved, not rejected."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            real_parent = base / "real_parent"
+            real_parent.mkdir()
+            alias_parent = base / "alias_parent"
+            try:
+                alias_parent.symlink_to(real_parent, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+
+            store = TestBundleStore(alias_parent / "workspace")
+
+        self.assertTrue(store.workspace_root.endswith("real_parent/workspace"))
+
+    def test_symlinked_internal_originals_directory_is_detected(self):
+        """Symlinks inside the app-controlled committed tree remain forbidden."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = self._bundle(base / "source")
+            store = TestBundleStore(base / "workspace")
+            bundle = store.import_bundle(source).bundle
+            bundle_dir = Path(bundle.bundle_dir)
+            originals = bundle_dir / "originals"
+            outside = base / "outside_originals"
+            shutil_target = base / "saved_originals"
+            originals.rename(shutil_target)
+            outside.mkdir()
+            try:
+                originals.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                shutil_target.rename(originals)
+                self.skipTest("symlinks unavailable")
+            with self.assertRaises(AutogradingBundleIntegrityError):
+                store.verify_bundle(bundle)
+
+    def test_symlinked_bundle_index_is_detected_before_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = self._bundle(base / "source")
+            store = TestBundleStore(base / "workspace")
+            stored = store.import_bundle(source).bundle
+            index = (
+                Path(store.root)
+                / stored.reference.assessment_id.replace("/", "_")
+            )
+            # Use the repository's actual path rather than reconstructing the safe
+            # component, which may contain a digest suffix.
+            matches = list(Path(store.root).glob("*/bundles/index.json"))
+            self.assertEqual(len(matches), 1)
+            index_path = matches[0]
+            outside = base / "outside_index.json"
+            outside.write_text(index_path.read_text(encoding="utf-8"), encoding="utf-8")
+            index_path.unlink()
+            try:
+                index_path.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            with self.assertRaises(AutogradingBundleIntegrityError):
+                store.list_bundle_references("LAB1")
 
     def test_source_root_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
