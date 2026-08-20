@@ -77,6 +77,18 @@ class ExecutionResultProtocolError(AutogradingExecutionError, ValueError):
     """Raised when backend output violates the normalized execution-result protocol."""
 
 
+class DockerBackendConfigurationError(AutogradingExecutionError, ValueError):
+    """Raised when Docker backend settings violate the isolated-run contract."""
+
+
+class DockerCommandError(AutogradingExecutionError):
+    """Raised when a Docker CLI control command cannot complete safely."""
+
+
+class DockerSandboxError(AutogradingExecutionError):
+    """Raised when immutable inputs cannot be staged for isolated execution."""
+
+
 class AutogradingBundleError(AutogradingError):
     """Base class for instructor test-bundle ingestion/storage failures."""
 
@@ -105,6 +117,9 @@ __all__ = [
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
+    "DockerBackendConfigurationError",
+    "DockerCommandError",
+    "DockerSandboxError",
     "ExecutionBackendContractError",
     "ExecutionBackendUnavailableError",
     "ExecutionPlanValidationError",

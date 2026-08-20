@@ -1,9 +1,10 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-4 provide domain/configuration contracts, immutable instructor
-test-bundle storage, a canonical-submission-to-execution-plan bridge, and the
-isolated execution-backend abstraction.  Commit 4 still provides no production
-backend capable of executing student code and does not import Docker/pytest.
+v2.3.3 Commits 1-5 provide domain/configuration contracts, immutable instructor
+test-bundle storage, a canonical-submission-to-execution-plan bridge, the
+execution-backend abstraction, and the first hardened Docker execution backend.
+Direct host execution remains prohibited; structured pytest execution arrives in
+Commit 6.
 """
 
 from .config import (
@@ -48,6 +49,9 @@ from .errors import (
     AutogradingSerializationError,
     AutogradingValidationError,
     CanonicalSubmissionIntegrityError,
+    DockerBackendConfigurationError,
+    DockerCommandError,
+    DockerSandboxError,
     ExecutionBackendContractError,
     ExecutionBackendUnavailableError,
     ExecutionPlanValidationError,
@@ -67,6 +71,21 @@ from .execution import (
     BACKEND_SECURITY_PROFILE_TEST_FAKE,
     BackendAvailability,
     BackendExecutionRecord,
+    DEFAULT_DOCKER_IMAGE,
+    DEFAULT_DOCKER_INTERPRETER,
+    DEFAULT_DOCKER_RUNTIME_USER,
+    DEFAULT_DOCKER_TMPFS_MB,
+    DOCKER_BACKEND_NAME,
+    DockerCLI,
+    DockerCommandResult,
+    DockerContainerState,
+    DockerExecutionBackend,
+    DockerImageInfo,
+    MaterializedSandbox,
+    SandboxMaterializer,
+    build_docker_create_args,
+    run_bounded_command,
+    safe_container_name,
     EXECUTION_AVAILABILITY_SCHEMA_VERSION,
     ExecutionBackend,
     NONTERMINAL_EXECUTION_STATUSES,
@@ -168,6 +187,24 @@ __all__ = list(_model_all) + [
     "AutogradingSerializationError",
     "AutogradingValidationError",
     "CanonicalSubmissionIntegrityError",
+    "DockerBackendConfigurationError",
+    "DockerCommandError",
+    "DockerSandboxError",
+    "DEFAULT_DOCKER_IMAGE",
+    "DEFAULT_DOCKER_INTERPRETER",
+    "DEFAULT_DOCKER_RUNTIME_USER",
+    "DEFAULT_DOCKER_TMPFS_MB",
+    "DOCKER_BACKEND_NAME",
+    "DockerCLI",
+    "DockerCommandResult",
+    "DockerContainerState",
+    "DockerExecutionBackend",
+    "DockerImageInfo",
+    "MaterializedSandbox",
+    "SandboxMaterializer",
+    "build_docker_create_args",
+    "run_bounded_command",
+    "safe_container_name",
     "ExecutionBackend",
     "ExecutionBackendContractError",
     "ExecutionBackendUnavailableError",
