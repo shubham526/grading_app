@@ -31,6 +31,32 @@ class UnsupportedAutogradingRunnerError(AutogradingValidationError):
     """Raised when a configuration names an unsupported test runner."""
 
 
+
+
+class AutogradingPlanningError(AutogradingError, ValueError):
+    """Base class for canonical-submission / execution-plan preparation failures."""
+
+
+class NoCanonicalSubmissionError(AutogradingPlanningError):
+    """Raised when the requested student/assessment has no selectable submission."""
+
+
+class ProgrammingSubmissionContractError(AutogradingPlanningError):
+    """Raised when canonical programming artifacts do not satisfy the grader contract."""
+
+
+class CanonicalSubmissionIntegrityError(AutogradingPlanningError):
+    """Raised when immutable canonical student bytes fail size/hash verification."""
+
+
+class AutogradingBundleSelectionError(AutogradingPlanningError):
+    """Raised when an immutable instructor bundle cannot be selected for planning."""
+
+
+class ExecutionPlanValidationError(AutogradingPlanningError):
+    """Raised when a transient execution plan/workspace contract is inconsistent."""
+
+
 class AutogradingBundleError(AutogradingError):
     """Base class for instructor test-bundle ingestion/storage failures."""
 
@@ -50,11 +76,17 @@ class AutogradingBundleStorageError(AutogradingBundleError):
 __all__ = [
     "AutogradingBundleError",
     "AutogradingBundleIntegrityError",
+    "AutogradingBundleSelectionError",
     "AutogradingBundleStorageError",
     "AutogradingBundleValidationError",
     "AutogradingError",
+    "AutogradingPlanningError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
+    "CanonicalSubmissionIntegrityError",
+    "ExecutionPlanValidationError",
+    "NoCanonicalSubmissionError",
+    "ProgrammingSubmissionContractError",
     "UnsupportedAutogradingLanguageError",
     "UnsupportedAutogradingRunnerError",
     "UnsupportedAutogradingSchemaError",

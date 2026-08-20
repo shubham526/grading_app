@@ -11,8 +11,9 @@ handlers:
 * one PDF when the caller explicitly authorizes the existing accommodation
   pathway.
 
-Programming and LaTeX-project ZIP routes are recognized now so v2.3.3 and
-v2.3.4 can plug into the same router without changing canonical storage.
+Programming submissions are now handled by the v2.3.3 autograding planner.
+LaTeX-project ZIP routes remain recognized for v2.3.4 without changing
+canonical storage.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ REASON_MULTIPLE_LATEX_SOURCES = "multiple_latex_sources"
 REASON_MULTIPLE_PDFS = "multiple_pdfs"
 REASON_MIXED_ARTIFACTS = "unsupported_mixed_artifacts"
 REASON_UNSUPPORTED_ARTIFACTS = "unsupported_artifacts"
-REASON_PROGRAMMING_HANDLER_PENDING = "handler_not_available_until_v2.3.3"
+REASON_PROGRAMMING_HANDLER_PENDING = "handler_not_available_until_v2.3.3"  # legacy diagnostic constant
 REASON_LATEX_PROJECT_HANDLER_PENDING = "handler_not_available_until_v2.3.4"
 
 
@@ -175,17 +176,22 @@ def route_submission(submission: Submission) -> RouteDecision:
             reason=REASON_MULTIPLE_PDFS,
         )
 
-    # Pure Python/multi-file Python is recognized now but execution belongs to
-    # v2.3.3.  Supporting non-Python files intentionally force MIXED until the
-    # programming submission contract is defined there.
+    # Pure Python/multi-file Python is handled by the v2.3.3 autograding
+    # planner.  The router only classifies the immutable canonical artifact
+    # structure; planning validates the assignment's entrypoint/required-file
+    # contract and execution still belongs to later v2.3.3 commits.
+    # Supporting non-Python files remain MIXED until a future programming
+    # submission contract explicitly admits them.
     if python and not tex and not pdf and not project_zip and not other:
         return _decision(
             route=ROUTE_PROGRAMMING_PYTHON,
             handler=HANDLER_PROGRAMMING,
-            supported=False,
+            supported=True,
             artifact_ids=tuple(a.artifact_id for a in python),
-            reason=REASON_PROGRAMMING_HANDLER_PENDING,
-            metadata={"python_file_count": len(python)},
+            metadata={
+                "python_file_count": len(python),
+                "handler_available_since": "2.3.3",
+            },
         )
 
     # Existing v2.2 normal submissions have exactly one canonical LaTeX source

@@ -22,7 +22,6 @@ from src.submissions.routing import (
     REASON_LATEX_PROJECT_HANDLER_PENDING,
     REASON_MULTIPLE_LATEX_SOURCES,
     REASON_NO_ARTIFACTS,
-    REASON_PROGRAMMING_HANDLER_PENDING,
     ROUTE_LATEX_PROJECT,
     ROUTE_LATEX_SINGLE_SOURCE,
     ROUTE_MIXED,
@@ -141,7 +140,7 @@ class TestSubmissionRoutingV232(unittest.TestCase):
         self.assertTrue(decision.supported)
         self.assertTrue(decision.requires_explicit_accommodation)
 
-    def test_python_route_is_recognized_but_pending_v233(self):
+    def test_python_route_is_supported_by_v233_planner(self):
         decision = route_submission(
             _submission([
                 _artifact(
@@ -162,8 +161,9 @@ class TestSubmissionRoutingV232(unittest.TestCase):
         )
         self.assertEqual(decision.route, ROUTE_PROGRAMMING_PYTHON)
         self.assertEqual(decision.handler, HANDLER_PROGRAMMING)
-        self.assertFalse(decision.supported)
-        self.assertEqual(decision.reason, REASON_PROGRAMMING_HANDLER_PENDING)
+        self.assertTrue(decision.supported)
+        self.assertIsNone(decision.reason)
+        self.assertEqual(decision.metadata["handler_available_since"], "2.3.3")
         self.assertEqual(len(decision.artifact_ids), 2)
 
     def test_pdf_plus_zip_routes_to_future_latex_project_handler(self):

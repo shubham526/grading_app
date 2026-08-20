@@ -1,8 +1,8 @@
 """Programming Submission & Autograding backend for the Rubric Grading Tool.
 
-v2.3.3 Commits 1-2 provide dependency-free domain/configuration contracts plus
-validated, immutable instructor test-bundle ingestion/storage.  They do **not**
-execute student code, import Docker/pytest, or depend on PyQt.
+v2.3.3 Commits 1-3 provide domain/configuration contracts, immutable instructor
+test-bundle storage, and a canonical-submission-to-execution-plan bridge.  They
+do **not** execute student code, import Docker/pytest, or depend on PyQt.
 """
 
 from .config import (
@@ -38,11 +38,17 @@ from .bundles import (
 from .errors import (
     AutogradingBundleError,
     AutogradingBundleIntegrityError,
+    AutogradingBundleSelectionError,
     AutogradingBundleStorageError,
     AutogradingBundleValidationError,
     AutogradingError,
+    AutogradingPlanningError,
     AutogradingSerializationError,
     AutogradingValidationError,
+    CanonicalSubmissionIntegrityError,
+    ExecutionPlanValidationError,
+    NoCanonicalSubmissionError,
+    ProgrammingSubmissionContractError,
     UnsupportedAutogradingLanguageError,
     UnsupportedAutogradingRunnerError,
     UnsupportedAutogradingSchemaError,
@@ -50,6 +56,29 @@ from .errors import (
 from .ids import (
     generate_autograding_run_id,
     generate_test_bundle_id,
+)
+from .planner import (
+    EXECUTION_PLAN_SCHEMA_VERSION,
+    ExecutionPlan,
+    build_execution_plan,
+    build_execution_plan_from_bundle,
+)
+from .submission_adapter import (
+    PROGRAMMING_PATH_METADATA_KEY,
+    ProgrammingSubmissionSelection,
+    select_programming_submission,
+)
+from .workspace import (
+    EXECUTION_WORKSPACE_SCHEMA_VERSION,
+    GRADER_DIRECTORY,
+    OUTPUT_DIRECTORY,
+    SUBMISSION_DIRECTORY,
+    WORKSPACE_NAMESPACE_GRADER,
+    WORKSPACE_NAMESPACE_SUBMISSION,
+    WORKSPACE_NAMESPACES,
+    ExecutionWorkspaceSpec,
+    PlannedWorkspaceFile,
+    normalize_workspace_relative_path,
 )
 from .validation import (
     ALLOWED_TOP_LEVEL_ENTRIES,
@@ -76,6 +105,7 @@ __all__ = list(_model_all) + [
     "AUTOGRADING_DIRECTORY",
     "AutogradingBundleError",
     "AutogradingBundleIntegrityError",
+    "AutogradingBundleSelectionError",
     "AutogradingBundleStorageError",
     "AutogradingBundleValidationError",
     "BUNDLES_DIRECTORY",
@@ -105,8 +135,30 @@ __all__ = list(_model_all) + [
     "AUTOGRADING_CONFIG_SCHEMA_VERSION",
     "AutogradingConfig",
     "AutogradingError",
+    "AutogradingPlanningError",
     "AutogradingSerializationError",
     "AutogradingValidationError",
+    "CanonicalSubmissionIntegrityError",
+    "ExecutionPlanValidationError",
+    "EXECUTION_PLAN_SCHEMA_VERSION",
+    "EXECUTION_WORKSPACE_SCHEMA_VERSION",
+    "ExecutionPlan",
+    "ExecutionWorkspaceSpec",
+    "GRADER_DIRECTORY",
+    "NoCanonicalSubmissionError",
+    "OUTPUT_DIRECTORY",
+    "PROGRAMMING_PATH_METADATA_KEY",
+    "PlannedWorkspaceFile",
+    "ProgrammingSubmissionContractError",
+    "ProgrammingSubmissionSelection",
+    "SUBMISSION_DIRECTORY",
+    "WORKSPACE_NAMESPACE_GRADER",
+    "WORKSPACE_NAMESPACE_SUBMISSION",
+    "WORKSPACE_NAMESPACES",
+    "build_execution_plan",
+    "build_execution_plan_from_bundle",
+    "normalize_workspace_relative_path",
+    "select_programming_submission",
     "DEFAULT_REPORTING_POLICY",
     "SCORING_METHOD_EQUAL_WITHIN_GROUP",
     "SCORING_METHOD_EXPLICIT_TEST_POINTS",
