@@ -1,7 +1,8 @@
-"""Canonical submission import dialog for v2.3.2 Commit 7.
+"""Canonical submission import dialog with v2.3.4.2 LaTeX-project UX.
 
-The dialog owns only preview/mapping/selection UI.  Slow discovery, hashing,
-copying, and parsing are delegated to :class:`SubmissionImportWorker`.
+The dialog owns preview, mapping, explicit ambiguous-root selection, and commit
+intent. Slow discovery, hashing, safe ZIP preflight, copying, compilation, and
+parsing remain delegated to :class:`SubmissionImportWorker` and backend services.
 """
 
 from __future__ import annotations
@@ -33,6 +34,16 @@ from src.submissions import (
 from src.submissions.domain import (
     VALIDATION_STATUS_DUPLICATE,
     VALIDATION_STATUS_READY,
+)
+from src.submissions.latex_project import (
+    LATEX_PROJECT_ROOT_METADATA_KEY,
+    apply_latex_project_preview_validation,
+    candidate_latex_project_preview,
+    latex_project_root_selection_required,
+    set_candidate_latex_project_root,
+)
+from src.ui.dialogs.latex_project_root_dialog import (
+    LatexProjectRootSelectionDialog,
 )
 from src.ui.workers.submission_import_worker import (
     SubmissionImportOperation,
@@ -78,6 +89,7 @@ class SubmissionImportDialog(QDialog):
         self._raw_candidates: List[ImportCandidate] = []
         self._candidates: List[ImportCandidate] = []
         self._workers: Dict[str, SubmissionImportWorker] = {}
+        self._latex_project_root_overrides: Dict[str, str] = {}
         self._rebuilding = False
         self._build_ui()
 
@@ -103,7 +115,9 @@ class SubmissionImportDialog(QDialog):
         description = QLabel(
             "Select local files or a submission folder. The app will hash the original "
             "files, conservatively match them to the loaded roster, detect duplicate "
-            "attempts, and preview every import before anything is committed.",
+            "attempts, and preview every import before anything is committed. LaTeX "
+            "project ZIPs are safely inspected; if multiple complete root documents "
+            "exist, you will choose the correct root before import.",
             self,
         )
         description.setWordWrap(True)
@@ -227,6 +241,7 @@ class SubmissionImportDialog(QDialog):
             return
         self._raw_candidates = []
         self._candidates = []
+        self._latex_project_root_overrides = {}
         self._populate_table()
 
     # ------------------------------------------------------------------
@@ -239,6 +254,30 @@ class SubmissionImportDialog(QDialog):
         if student_name and student_id and student_name != student_id:
             return f"{student_name} ({student_id})"
         return student_name or student_id
+
+    def _prepare_candidates(
+        self,
+        raw_candidates: Sequence[ImportCandidate],
+        *,
+        student_overrides: Optional[Mapping[str, str]] = None,
+    ) -> List[ImportCandidate]:
+        prepared = self.importer.prepare_candidates(
+            raw_candidates,
+            student_overrides=student_overrides,
+        )
+        for candidate in prepared:
+            selected_root = self._latex_project_root_overrides.get(
+                candidate.candidate_id
+            )
+            if selected_root:
+                try:
+                    set_candidate_latex_project_root(candidate, selected_root)
+                except ValueError:
+                    self._latex_project_root_overrides.pop(
+                        candidate.candidate_id, None
+                    )
+            apply_latex_project_preview_validation(candidate)
+        return prepared
 
     def _populate_table(self) -> None:
         self._rebuilding = True
@@ -302,6 +341,8 @@ class SubmissionImportDialog(QDialog):
         self._update_summary()
 
     def _friendly_status(self, candidate: ImportCandidate) -> str:
+        if latex_project_root_selection_required(candidate):
+            return "Choose project root"
         status = candidate.validation_status
         mapping = {
             "ready": "Ready",
@@ -316,6 +357,20 @@ class SubmissionImportDialog(QDialog):
 
     def _candidate_details(self, candidate: ImportCandidate, *, multiline: bool = False) -> str:
         values: List[str] = []
+        preview = candidate_latex_project_preview(candidate)
+        if preview is not None:
+            selected_root = str(
+                candidate.metadata.get(LATEX_PROJECT_ROOT_METADATA_KEY) or ""
+            ).strip()
+            if selected_root:
+                values.append("LaTeX project root: %s" % selected_root)
+            elif preview.requires_root_selection:
+                values.append(
+                    "Choose LaTeX root: %s"
+                    % ", ".join(preview.candidate_paths)
+                )
+            elif preview.error_message:
+                values.append("LaTeX project: %s" % preview.error_message)
         duplicate = candidate.metadata.get("duplicate_status")
         if duplicate and duplicate not in {"none", "not_checked"}:
             values.append(str(duplicate).replace("_", " "))
@@ -335,7 +390,7 @@ class SubmissionImportDialog(QDialog):
                 if student_id:
                     overrides[candidate.candidate_id] = student_id
         try:
-            self._candidates = self.importer.prepare_candidates(
+            self._candidates = self._prepare_candidates(
                 self._raw_candidates,
                 student_overrides=overrides,
             )
@@ -375,6 +430,10 @@ class SubmissionImportDialog(QDialog):
             for item in self._candidates
         )
         unresolved = len(self._candidates) - ready - duplicates
+        roots_needed = sum(
+            latex_project_root_selection_required(item)
+            for item in self._candidates
+        )
         selected = len(self._selected_candidates()) if self._candidates else 0
         if not self._candidates:
             text = "No submissions selected."
@@ -382,6 +441,7 @@ class SubmissionImportDialog(QDialog):
             text = (
                 f"{len(self._candidates)} candidate(s): {ready} ready, "
                 f"{duplicates} exact duplicate(s), {unresolved} needing attention. "
+                f"{roots_needed} LaTeX project root choice(s) pending. "
                 f"{selected} selected for import."
             )
         self.status_label.setText(text)
@@ -392,10 +452,50 @@ class SubmissionImportDialog(QDialog):
     # Commit
     # ------------------------------------------------------------------
 
+    def _resolve_latex_project_roots(
+        self,
+        selected: Sequence[ImportCandidate],
+    ) -> bool:
+        for candidate in selected:
+            if not latex_project_root_selection_required(candidate):
+                continue
+            preview = candidate_latex_project_preview(candidate)
+            if preview is None:
+                continue
+            student_label = str(candidate.proposed_student_id or "").strip()
+            archive_name = preview.archive_name or ", ".join(
+                item.original_filename for item in candidate.files
+            )
+            dialog = LatexProjectRootSelectionDialog(
+                preview.candidate_paths,
+                archive_name=archive_name,
+                student_label=student_label,
+                preferred_hints=preview.metadata.get(
+                    "preferred_name_hints", []
+                ),
+                parent=self,
+            )
+            if dialog.exec_() != QDialog.Accepted or not dialog.selected_root:
+                self.status_label.setText(
+                    "Import cancelled before commit; LaTeX project root selection "
+                    "was not completed."
+                )
+                return False
+            selected_root = str(dialog.selected_root)
+            self._latex_project_root_overrides[candidate.candidate_id] = (
+                selected_root
+            )
+            set_candidate_latex_project_root(candidate, selected_root)
+        self._populate_table()
+        return True
+
     def _commit_selected(self) -> None:
         selected = self._selected_candidates()
         if not selected:
             QMessageBox.information(self, "Nothing Selected", "Select at least one ready submission.")
+            return
+
+        if not self._resolve_latex_project_roots(selected):
             return
 
         force_ids: Set[str] = {
@@ -486,7 +586,7 @@ class SubmissionImportDialog(QDialog):
             # it. Candidate IDs are opaque and unique, so re-preparation safely
             # handles duplicate bytes in the combined batch.
             self._raw_candidates.extend(raw)
-            self._candidates = self.importer.prepare_candidates(self._raw_candidates)
+            self._candidates = self._prepare_candidates(self._raw_candidates)
             self._populate_table()
             if not prepared and not raw:
                 self.status_label.setText("No supported files were found in that selection.")
@@ -504,21 +604,36 @@ class SubmissionImportDialog(QDialog):
             # Re-evaluate the same preview against the updated repository so
             # successfully imported rows become exact duplicates and are no
             # longer selected by default.
-            self._candidates = self.importer.prepare_candidates(self._raw_candidates)
+            self._candidates = self._prepare_candidates(self._raw_candidates)
             self._populate_table()
-            if error_count:
+            parse_errors = dict(payload.get("parse_errors", {}) or {})
+            unresolved_roots = dict(
+                payload.get("root_resolution_required", {}) or {}
+            )
+            if error_count or parse_errors or unresolved_roots:
                 errors = getattr(result, "errors", {}) or {}
+                details: List[str] = []
+                details.extend(str(value) for value in errors.values())
+                details.extend(
+                    "Grading evidence for %s: %s" % (student_id, message)
+                    for student_id, message in sorted(parse_errors.items())
+                )
+                details.extend(
+                    "LaTeX project root still unresolved for %s" % student_id
+                    for student_id in sorted(unresolved_roots)
+                )
                 QMessageBox.warning(
                     self,
-                    "Import Completed with Errors",
-                    f"Imported {imported_count} submission(s); {error_count} failed.\n\n"
-                    + "\n".join(str(value) for value in errors.values()),
+                    "Import Completed with Attention Needed",
+                    f"Imported {imported_count} submission(s); {error_count} canonical "
+                    "import(s) failed.\n\n" + "\n".join(details),
                 )
             else:
                 QMessageBox.information(
                     self,
                     "Import Complete",
-                    f"Imported {imported_count} submission(s). Original evidence is now stored canonically.",
+                    f"Imported {imported_count} submission(s). Original evidence is "
+                    "stored canonically and supported Written grading evidence was prepared.",
                 )
 
     def _worker_failed(

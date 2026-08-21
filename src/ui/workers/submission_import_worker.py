@@ -1,9 +1,9 @@
-"""Background worker for v2.3.2 canonical submission import.
+"""Background worker for canonical submission import and LaTeX ZIP preflight.
 
-The worker keeps discovery, hashing, canonical file copying, and optional parsing
-of newly active supported submissions off the Qt GUI thread.  It does not mutate
-``SubmissionController`` state.  The main-window/UI thread registers returned
-``Submission`` / ``ParsedSubmission`` objects after completion.
+The worker keeps discovery, hashing, safe project preview, canonical file copying,
+and optional parsing/compilation of newly active supported submissions off the Qt
+GUI thread. It does not mutate ``SubmissionController`` state. The main-window/UI
+thread registers returned ``Submission`` / ``ParsedSubmission`` objects.
 """
 
 from __future__ import annotations
@@ -29,6 +29,12 @@ from src.submissions import (
     generate_import_batch_id,
     parse_canonical_submission,
     route_submission,
+)
+from src.submissions.latex_project import (
+    LATEX_PROJECT_ROOT_METADATA_KEY,
+    LatexProjectRootResolutionRequiredError,
+    apply_latex_project_preview_validation,
+    preflight_latex_project_candidates,
 )
 
 
@@ -166,8 +172,15 @@ class SubmissionImportWorker(QRunnable):
         raw_candidates = adapter.discover(assessment_id=self.assessment_id)
         if self.is_cancelled:
             return {"raw_candidates": [], "candidates": []}
+        self._emit_progress("Safely inspecting LaTeX project ZIPs…")
+        raw_candidates = preflight_latex_project_candidates(raw_candidates)
+        if self.is_cancelled:
+            return {"raw_candidates": [], "candidates": []}
         self._emit_progress("Matching submissions to the roster…")
-        prepared = self._importer().prepare_candidates(raw_candidates)
+        prepared = [
+            apply_latex_project_preview_validation(item)
+            for item in self._importer().prepare_candidates(raw_candidates)
+        ]
         return {
             "raw_candidates": raw_candidates,
             "candidates": prepared,
@@ -189,8 +202,15 @@ class SubmissionImportWorker(QRunnable):
         raw_candidates = adapter.discover(assessment_id=self.assessment_id)
         if self.is_cancelled:
             return {"raw_candidates": [], "candidates": []}
+        self._emit_progress("Safely inspecting LaTeX project ZIPs…")
+        raw_candidates = preflight_latex_project_candidates(raw_candidates)
+        if self.is_cancelled:
+            return {"raw_candidates": [], "candidates": []}
         self._emit_progress("Matching submissions to the roster…")
-        prepared = self._importer().prepare_candidates(raw_candidates)
+        prepared = [
+            apply_latex_project_preview_validation(item)
+            for item in self._importer().prepare_candidates(raw_candidates)
+        ]
         return {
             "raw_candidates": raw_candidates,
             "candidates": prepared,
@@ -297,6 +317,7 @@ class SubmissionImportWorker(QRunnable):
         parsed_by_student: Dict[str, Any] = {}
         parse_errors: Dict[str, str] = {}
         handler_pending: Dict[str, str] = {}
+        root_resolution_required: Dict[str, Dict[str, Any]] = {}
 
         affected_students = sorted({item.student_id for item in submissions})
         for student_id in affected_students:
@@ -321,14 +342,25 @@ class SubmissionImportWorker(QRunnable):
 
             self._emit_progress(f"Preparing grading evidence for {student_id}…")
             try:
+                selected_root = str(
+                    active.metadata.get(LATEX_PROJECT_ROOT_METADATA_KEY) or ""
+                ).strip() or None
                 parsed_by_student[student_id] = parse_canonical_submission(
                     active,
                     self.repository,
                     question_ids,
                     compile_pdf=compile_pdf,
+                    latex_project_root=selected_root,
                     accommodation_mode=False,
                     evidence_dir=(str(evidence_dir) if evidence_dir else None),
                 )
+            except LatexProjectRootResolutionRequiredError as exc:
+                root_resolution_required[student_id] = {
+                    "submission_id": active.submission_id,
+                    "candidate_paths": list(exc.resolution.candidate_paths),
+                    "status": exc.resolution.status,
+                    "message": str(exc),
+                }
             except (SubmissionHandlerUnavailableError, ExplicitAccommodationRequiredError) as exc:
                 handler_pending[student_id] = str(exc)
             except Exception as exc:
@@ -341,6 +373,7 @@ class SubmissionImportWorker(QRunnable):
             "parsed_by_student": parsed_by_student,
             "parse_errors": parse_errors,
             "handler_pending": handler_pending,
+            "root_resolution_required": root_resolution_required,
         }
 
 

@@ -1,10 +1,8 @@
 """Backend support for Overleaf / multi-file LaTeX project ingestion.
 
-v2.3.4.2 Commit 5 extends the existing restricted LaTeX-to-PDF compiler to
-whole safely extracted Overleaf projects. Project discovery/root resolution
-remain separate from compilation. Canonical submission bridging now adapts
-compiled projects into the existing Written ``ParsedSubmission`` contract;
-ZIP import UI arrives in a later commit.
+v2.3.4.2 Commit 6 adds execution-free ZIP import preview and explicit root
+selection on top of the Commit-5 canonical Written bridge. Project discovery,
+root resolution, compilation, and canonical persistence remain separate layers.
 """
 
 from .archive import (
@@ -48,6 +46,21 @@ from .errors import (
     LatexProjectValidationError,
     UnsupportedLatexProjectSchemaError,
 )
+from .import_preview import (
+    LATEX_PROJECT_PREVIEW_METADATA_KEY,
+    LATEX_PROJECT_ROOT_METADATA_KEY,
+    LATEX_PROJECT_ROOT_METHOD_METADATA_KEY,
+    ROOT_SELECTION_DETERMINISTIC,
+    ROOT_SELECTION_INSTRUCTOR,
+    LatexProjectImportPreview,
+    apply_latex_project_preview_validation,
+    candidate_latex_project_preview,
+    inspect_latex_project_zip,
+    latex_project_root_selection_required,
+    preflight_latex_project_candidate,
+    preflight_latex_project_candidates,
+    set_candidate_latex_project_root,
+)
 from .models import *  # re-export stable domain constants/value objects
 from .models import __all__ as _model_all
 from .resolution import (
@@ -77,6 +90,19 @@ from .storage import (
 
 
 __all__ = list(_model_all) + [
+    "LATEX_PROJECT_PREVIEW_METADATA_KEY",
+    "LATEX_PROJECT_ROOT_METADATA_KEY",
+    "LATEX_PROJECT_ROOT_METHOD_METADATA_KEY",
+    "ROOT_SELECTION_DETERMINISTIC",
+    "ROOT_SELECTION_INSTRUCTOR",
+    "LatexProjectImportPreview",
+    "apply_latex_project_preview_validation",
+    "candidate_latex_project_preview",
+    "inspect_latex_project_zip",
+    "latex_project_root_selection_required",
+    "preflight_latex_project_candidate",
+    "preflight_latex_project_candidates",
+    "set_candidate_latex_project_root",
     "ARCHIVE_METADATA_FILENAME",
     "DEFAULT_IGNORED_DIRECTORY_NAMES",
     "DEFAULT_IGNORED_METADATA_NAMES",
