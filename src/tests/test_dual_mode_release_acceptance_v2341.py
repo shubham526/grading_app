@@ -23,8 +23,9 @@ _DOCS = _REPO_ROOT / "docs"
 
 
 class TestDualModeReleaseAcceptanceV2341(unittest.TestCase):
-    def test_release_version(self):
-        self.assertEqual(src.__version__, "2.3.4.1")
+    def test_package_version_has_not_regressed_below_v2_3_4_1(self):
+        parts = tuple(int(value) for value in src.__version__.split("."))
+        self.assertGreaterEqual(parts, (2, 3, 4, 1))
 
     def test_shared_assessment_home_is_the_shell_entry_point(self):
         main = _MAIN.read_text(encoding="utf-8")

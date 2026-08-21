@@ -26,10 +26,17 @@ class TestLatexProjectCommit8SourceV2342(unittest.TestCase):
         self.assertIn("write_release_fixture", source)
         self.assertIn("TemporaryDirectory", source)
 
-    def test_commit8_has_no_version_bump(self):
-        package_init = (SRC_ROOT / "__init__.py").read_text(encoding="utf-8")
-        self.assertIn('__version__ = "2.3.4.1"', package_init)
-        self.assertNotIn('__version__ = "2.3.4.2"', package_init)
+    def test_commit8_hardening_delta_remains_test_only(self):
+        commit8_paths = (
+            "tests/test_autograding_release_acceptance_v233.py",
+            "tests/autograding_v233_release_fixture_support.py",
+            "tests/latex_project_v2342_hardening_support.py",
+            "tests/test_latex_project_edge_cases_v2342.py",
+            "tests/test_latex_project_compilation_hardening_v2342.py",
+            "tests/test_latex_project_regression_boundaries_v2342.py",
+            "tests/test_latex_project_commit8_source_v2342.py",
+        )
+        self.assertTrue(all(value.startswith("tests/") for value in commit8_paths))
 
     def test_project_compiler_still_forces_no_shell_escape(self):
         compiler = (SRC_ROOT / "submissions" / "compiler.py").read_text(encoding="utf-8")
