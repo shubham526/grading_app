@@ -80,9 +80,9 @@ so each safety boundary can be tested independently.
 - `v2.3.2_submission_core_provenance_design.md`
 - `v2.3.3_programming_submission_autograding_design.md`
 - `v2.3.4.2_overleaf_latex_zip_ingestion_design.md`
-- `v2.3.5_structured_regrade_adjudication_design.md`
-- `v2.3.6_canvas_grading_integration_overview.md`
-- `v2.3.6.1_canvas_connection_course_sync_design.md`
-- `v2.3.6.2_canvas_submission_file_sync_design.md`
-- `v2.3.6.3_canvas_grade_feedback_publishing_design.md`
-- `v2.3.6.4_canvas_reconciliation_audit_design.md`
+- `retired/v2.3.5_structured_regrade_adjudication_design.md`
+- `retired/v2.3.6_canvas_grading_integration_overview.md`
+- `retired/v2.3.6.1_canvas_connection_course_sync_design.md`
+- `retired/v2.3.6.2_canvas_submission_file_sync_design.md`
+- `retired/v2.3.6.3_canvas_grade_feedback_publishing_design.md`
+- `retired/v2.3.6.4_canvas_reconciliation_audit_design.md`
