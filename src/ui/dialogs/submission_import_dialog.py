@@ -45,6 +45,11 @@ from src.submissions.latex_project import (
 from src.ui.dialogs.latex_project_root_dialog import (
     LatexProjectRootSelectionDialog,
 )
+from src.ui.dialogs.latex_project_diagnostics_dialog import (
+    ACTION_RESELECT_ROOT,
+    ACTION_RETRY,
+    LatexProjectDiagnosticsDialog,
+)
 from src.ui.workers.submission_import_worker import (
     SubmissionImportOperation,
     SubmissionImportWorker,
@@ -55,6 +60,7 @@ class SubmissionImportDialog(QDialog):
     """Preview, map, and commit canonical local-file submissions."""
 
     imports_committed = pyqtSignal(object)
+    evidence_recovered = pyqtSignal(object, object)
 
     def __init__(
         self,
@@ -527,6 +533,72 @@ class SubmissionImportDialog(QDialog):
             },
         )
 
+    def _start_latex_project_recovery(
+        self,
+        student_id: str,
+        diagnostic: Mapping[str, Any],
+        *,
+        root_relative_path: Optional[str] = None,
+    ) -> None:
+        root = str(
+            root_relative_path
+            or diagnostic.get("root_relative_path")
+            or ""
+        ).strip() or None
+        self._start_worker(
+            SubmissionImportOperation.RECOVER_LATEX_PROJECT,
+            parameters={
+                "student_id": student_id,
+                "root_relative_path": root,
+                "question_ids": list(self.question_ids),
+                "evidence_dir": self.evidence_dir,
+            },
+        )
+
+    def _show_latex_project_diagnostic(
+        self,
+        student_id: str,
+        diagnostic: Mapping[str, Any],
+    ) -> None:
+        dialog = LatexProjectDiagnosticsDialog(
+            diagnostic,
+            student_id=student_id,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        if dialog.selected_action == ACTION_RETRY:
+            self._start_latex_project_recovery(student_id, diagnostic)
+            return
+        if dialog.selected_action != ACTION_RESELECT_ROOT:
+            return
+
+        candidates = [
+            str(value)
+            for value in (diagnostic.get("candidate_paths") or [])
+            if str(value).strip()
+        ]
+        if len(candidates) < 2:
+            QMessageBox.information(
+                self,
+                "Root Selection",
+                "No alternative LaTeX root candidates are available.",
+            )
+            return
+        root_dialog = LatexProjectRootSelectionDialog(
+            candidates,
+            archive_name="Persisted canonical LaTeX project",
+            student_label=student_id,
+            parent=self,
+        )
+        if root_dialog.exec_() != QDialog.Accepted or not root_dialog.selected_root:
+            return
+        self._start_latex_project_recovery(
+            student_id,
+            diagnostic,
+            root_relative_path=str(root_dialog.selected_root),
+        )
+
     # ------------------------------------------------------------------
     # Worker lifecycle
     # ------------------------------------------------------------------
@@ -576,6 +648,32 @@ class SubmissionImportDialog(QDialog):
     def _worker_completed(self, request_id: str, operation: str, payload: Any) -> None:
         if request_id not in self._workers:
             return
+        if operation == SubmissionImportOperation.RECOVER_LATEX_PROJECT.value:
+            if not isinstance(payload, dict):
+                QMessageBox.warning(
+                    self,
+                    "LaTeX Recovery",
+                    "Recovery completed without a result payload.",
+                )
+                return
+            student_id = str(payload.get("student_id") or "").strip()
+            parsed_by_student = dict(payload.get("parsed_by_student", {}) or {})
+            parsed = parsed_by_student.get(student_id)
+            submission = payload.get("submission")
+            if parsed is not None and submission is not None:
+                self.evidence_recovered.emit(submission, parsed)
+                QMessageBox.information(
+                    self,
+                    "LaTeX Recovery Complete",
+                    "The canonical project re-verified successfully and its grading PDF was regenerated.",
+                )
+                return
+            diagnostics = dict(payload.get("latex_project_diagnostics", {}) or {})
+            diagnostic = diagnostics.get(student_id)
+            if diagnostic is not None:
+                self._show_latex_project_diagnostic(student_id, diagnostic)
+            return
+
         if operation in {
             SubmissionImportOperation.DISCOVER_FILES.value,
             SubmissionImportOperation.DISCOVER_DIRECTORY.value,
@@ -610,7 +708,10 @@ class SubmissionImportDialog(QDialog):
             unresolved_roots = dict(
                 payload.get("root_resolution_required", {}) or {}
             )
-            if error_count or parse_errors or unresolved_roots:
+            latex_diagnostics = dict(
+                payload.get("latex_project_diagnostics", {}) or {}
+            )
+            if error_count or parse_errors or unresolved_roots or latex_diagnostics:
                 errors = getattr(result, "errors", {}) or {}
                 details: List[str] = []
                 details.extend(str(value) for value in errors.values())
@@ -622,12 +723,22 @@ class SubmissionImportDialog(QDialog):
                     "LaTeX project root still unresolved for %s" % student_id
                     for student_id in sorted(unresolved_roots)
                 )
+                details.extend(
+                    "LaTeX project for %s: %s"
+                    % (
+                        student_id,
+                        str(diagnostic.get("error_message") or diagnostic.get("status") or "attention required"),
+                    )
+                    for student_id, diagnostic in sorted(latex_diagnostics.items())
+                )
                 QMessageBox.warning(
                     self,
                     "Import Completed with Attention Needed",
                     f"Imported {imported_count} submission(s); {error_count} canonical "
                     "import(s) failed.\n\n" + "\n".join(details),
                 )
+                for student_id, diagnostic in sorted(latex_diagnostics.items()):
+                    self._show_latex_project_diagnostic(student_id, diagnostic)
             else:
                 QMessageBox.information(
                     self,

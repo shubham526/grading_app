@@ -13,12 +13,13 @@ It does not implement TeX composition, grading logic, or UI behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from ..domain import ArtifactFile, Submission
-from ..models import ParsedSubmission, SOURCE_LATEX, SUBMISSION_MODE_LATEX
+from ..models import CompilationResult, ParsedSubmission, SOURCE_LATEX, SUBMISSION_MODE_LATEX
 from ..pdf import (
     DEFAULT_MAX_PDF_BYTES,
     DEFAULT_MAX_PDF_PAGES,
@@ -39,6 +40,16 @@ from .models import (
     LatexProjectResolution,
 )
 from .resolution import resolve_latex_project_root, select_latex_project_root
+from .provenance import (
+    LatexProjectProvenanceState,
+    append_compilation_attempt,
+    load_latex_project_provenance,
+    provenance_diagnostic_payload,
+    provenance_path,
+    reusable_compiled_pdf,
+    save_latex_project_provenance,
+    state_with_resolution,
+)
 from .storage import LatexProjectArchiveStore, StoredLatexProject
 
 
@@ -74,6 +85,7 @@ class LatexProjectPreparedContext:
     discovery: LatexProjectDiscovery
     resolution: LatexProjectResolution
     compilation: LatexProjectCompilation
+    provenance: LatexProjectProvenanceState
 
 
 def _stable_project_id(submission: Submission, zip_artifact: ArtifactFile) -> str:
@@ -160,6 +172,10 @@ def _resolve_root(
     return resolution
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _compiler_kwargs(options: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     values = dict(options or {})
     allowed = {
@@ -178,6 +194,51 @@ def _compiler_kwargs(options: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return values
 
 
+def _effective_compiler_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+    effective: Dict[str, Any] = {
+        "engine": "pdflatex",
+        "passes": 1,
+        "timeout_seconds": 30.0,
+        "max_pdf_bytes": 100 * 1024 * 1024,
+        "max_log_chars": 200_000,
+    }
+    effective.update(dict(options))
+    return effective
+
+
+def _restored_compilation(
+    stored: StoredLatexProject,
+    resolution: LatexProjectResolution,
+    state: LatexProjectProvenanceState,
+    pdf_path: str,
+) -> LatexProjectCompilation:
+    latest = state.latest_attempt
+    if latest is None or not latest.success:
+        raise LatexProjectIntegrityError("Persisted compiled state has no successful attempt")
+    root_path = Path(stored.extracted_root).joinpath(
+        *PurePosixPath(str(resolution.root_relative_path)).parts
+    )
+    result = CompilationResult(
+        success=True,
+        source_path=str(root_path.resolve()),
+        engine=latest.engine,
+        pdf_path=str(Path(pdf_path).resolve()),
+        passes_completed=latest.passes_completed,
+        duration_seconds=latest.duration_seconds,
+        warnings=list(latest.warnings),
+    )
+    return LatexProjectCompilation(
+        project_id=stored.project_id,
+        root_relative_path=str(resolution.root_relative_path),
+        resolution_method=str(resolution.resolution_method),
+        archive_sha256=stored.archive.archive_sha256,
+        manifest_sha256=str(stored.manifest.manifest_sha256),
+        source_file_count=len(stored.manifest.files),
+        source_total_bytes=stored.manifest.total_uncompressed_bytes,
+        compilation=result,
+    )
+
+
 def prepare_canonical_latex_project(
     submission: Submission,
     repository: SubmissionRepository,
@@ -187,6 +248,8 @@ def prepare_canonical_latex_project(
     config: Optional[LatexProjectIngestionConfig] = None,
     compilation_dir: Optional[str] = None,
     compiler_options: Optional[Mapping[str, Any]] = None,
+    force_recompile: bool = False,
+    reuse_persisted_compilation: bool = True,
 ) -> LatexProjectPreparedContext:
     """Verify, resolve, and compile one canonical LaTeX-project ZIP."""
     if not isinstance(submission, Submission):
@@ -202,6 +265,11 @@ def prepare_canonical_latex_project(
     elif not isinstance(config, LatexProjectIngestionConfig):
         raise TypeError("config must be LatexProjectIngestionConfig")
 
+    if not isinstance(force_recompile, bool):
+        raise TypeError("force_recompile must be bool")
+    if not isinstance(reuse_persisted_compilation, bool):
+        raise TypeError("reuse_persisted_compilation must be bool")
+
     stored = _load_or_ingest_project(
         submission,
         repository,
@@ -213,7 +281,51 @@ def prepare_canonical_latex_project(
         stored.manifest,
         config=config,
     )
-    resolution = _resolve_root(discovery, config, root_relative_path)
+    previous_state = load_latex_project_provenance(stored)
+    if (
+        previous_state is not None
+        and previous_state.submission_id != submission.submission_id
+    ):
+        raise LatexProjectIntegrityError(
+            "Persisted provenance belongs to another canonical submission"
+        )
+    effective_root = root_relative_path
+    if effective_root is None and previous_state is not None:
+        effective_root = previous_state.root_relative_path
+    if effective_root is None:
+        effective_root = str(submission.metadata.get("latex_project_root") or "").strip() or None
+
+    resolution = _resolve_root(discovery, config, effective_root)
+    state = state_with_resolution(
+        stored,
+        submission_id=submission.submission_id,
+        resolution=resolution,
+        previous=previous_state,
+    )
+    save_latex_project_provenance(stored, state)
+
+    kwargs = _compiler_kwargs(compiler_options)
+    effective_options = _effective_compiler_options(kwargs)
+    if reuse_persisted_compilation and not force_recompile:
+        reusable_pdf = reusable_compiled_pdf(
+            stored,
+            state,
+            root_relative_path=str(resolution.root_relative_path),
+            compiler_options=effective_options,
+        )
+        if reusable_pdf is not None:
+            return LatexProjectPreparedContext(
+                stored=stored,
+                discovery=discovery,
+                resolution=resolution,
+                compilation=_restored_compilation(
+                    stored,
+                    resolution,
+                    state,
+                    reusable_pdf,
+                ),
+                provenance=state,
+            )
 
     if compilation_dir is None:
         output_dir = str(
@@ -226,7 +338,7 @@ def prepare_canonical_latex_project(
             / LATEX_PROJECT_DERIVED_DIRNAME
         )
 
-    kwargs = _compiler_kwargs(compiler_options)
+    started_at = _utc_now_iso()
     compilation = compile_stored_latex_project_to_pdf(
         stored,
         resolution,
@@ -234,6 +346,16 @@ def prepare_canonical_latex_project(
         config=config,
         **kwargs,
     )
+    state = append_compilation_attempt(
+        stored,
+        state,
+        compilation.compilation,
+        compiler_options=effective_options,
+        started_at=started_at,
+        completed_at=_utc_now_iso(),
+    )
+    save_latex_project_provenance(stored, state)
+
     if not compilation.success or not compilation.pdf_path:
         result = compilation.compilation
         reason = result.error_code or "latex_compilation_failed"
@@ -248,6 +370,7 @@ def prepare_canonical_latex_project(
         discovery=discovery,
         resolution=resolution,
         compilation=compilation,
+        provenance=state,
     )
 
 
@@ -283,6 +406,7 @@ def parse_canonical_latex_project(
     pdf_options: Optional[Mapping[str, Any]] = None,
     min_text_chars_per_page: int = DEFAULT_MIN_TEXT_CHARS_PER_PAGE,
     evidence_dir: Optional[str] = None,
+    force_recompile: bool = False,
 ) -> ParsedSubmission:
     """Compile and adapt one canonical LaTeX project for Written grading.
 
@@ -298,6 +422,7 @@ def parse_canonical_latex_project(
         config=config,
         compilation_dir=compilation_dir,
         compiler_options=compiler_options,
+        force_recompile=force_recompile,
     )
 
     compiled_pdf = str(context.compilation.pdf_path)
@@ -368,6 +493,13 @@ def parse_canonical_latex_project(
                 item.to_dict()
                 for item in context.resolution.diagnostics
             ],
+            "provenance_state_path": str(provenance_path(context.stored).resolve()),
+            "compilation_attempt_count": len(context.provenance.compilation_attempts),
+            "compiled_pdf_sha256": (
+                context.provenance.latest_attempt.compiled_pdf_sha256
+                if context.provenance.latest_attempt is not None
+                else None
+            ),
         },
     }
 
@@ -387,6 +519,43 @@ def parse_canonical_latex_project(
     return parsed
 
 
+def canonical_latex_project_diagnostic(
+    submission: Submission,
+    repository: SubmissionRepository,
+    zip_artifact: ArtifactFile,
+    *,
+    error: Optional[BaseException] = None,
+    candidate_paths: Sequence[str] = (),
+    root_relative_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return a structured instructor-facing status for one canonical project."""
+    project_id = _stable_project_id(submission, zip_artifact)
+    store = LatexProjectArchiveStore(str(_project_store_root(submission, repository)))
+    project_dir = store.project_dir(project_id)
+    stored = None
+    state = None
+    if project_dir.exists() and not project_dir.is_symlink():
+        try:
+            stored = store.load(project_id, verify=False)
+            state = load_latex_project_provenance(stored)
+        except Exception:
+            stored = None
+            state = None
+    payload = provenance_diagnostic_payload(
+        stored,
+        state,
+        error=error,
+        project_dir=str(project_dir),
+        candidate_paths=candidate_paths,
+        root_relative_path=root_relative_path,
+    )
+    if isinstance(error, LatexProjectRootResolutionRequiredError):
+        payload["status"] = error.resolution.status
+        payload["candidate_paths"] = list(error.resolution.candidate_paths)
+        payload["recoverable"] = True
+    return payload
+
+
 __all__ = [
     "LATEX_PROJECT_COMPILED_DIRNAME",
     "LATEX_PROJECT_DERIVED_DIRNAME",
@@ -394,6 +563,7 @@ __all__ = [
     "LatexProjectPreparedContext",
     "LatexProjectRootResolutionRequiredError",
     "LatexProjectWrittenBridgeError",
+    "canonical_latex_project_diagnostic",
     "parse_canonical_latex_project",
     "prepare_canonical_latex_project",
 ]

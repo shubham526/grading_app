@@ -1,8 +1,9 @@
 """Backend support for Overleaf / multi-file LaTeX project ingestion.
 
-v2.3.4.2 Commit 6 adds execution-free ZIP import preview and explicit root
-selection on top of the Commit-5 canonical Written bridge. Project discovery,
-root resolution, compilation, and canonical persistence remain separate layers.
+v2.3.4.2 Commit 7 adds restart-safe provenance, structured diagnostics, and
+verified recovery on top of the Commit-6 Written ZIP workflow. Original ZIPs
+and canonical submission manifests remain immutable; mutable recovery state is
+kept only under the derived LaTeX-project tree.
 """
 
 from .archive import (
@@ -67,6 +68,24 @@ from .resolution import (
     resolve_latex_project_root,
     select_latex_project_root,
 )
+from .provenance import (
+    LATEX_PROJECT_LOGS_DIRNAME,
+    LATEX_PROJECT_PROVENANCE_FILENAME,
+    LATEX_PROJECT_PROVENANCE_SCHEMA_VERSION,
+    PROJECT_STATUS_COMPILED,
+    PROJECT_STATUS_COMPILATION_FAILED,
+    PROJECT_STATUS_INTEGRITY_FAILED,
+    PROJECT_STATUS_ROOT_RESOLVED,
+    LatexProjectCompilationAttempt,
+    LatexProjectProvenanceState,
+    append_compilation_attempt,
+    load_latex_project_provenance,
+    provenance_diagnostic_payload,
+    provenance_path,
+    reusable_compiled_pdf,
+    save_latex_project_provenance,
+    state_with_resolution,
+)
 from .written_bridge import (
     LATEX_PROJECT_COMPILED_DIRNAME,
     LATEX_PROJECT_DERIVED_DIRNAME,
@@ -74,6 +93,7 @@ from .written_bridge import (
     LatexProjectPreparedContext,
     LatexProjectRootResolutionRequiredError,
     LatexProjectWrittenBridgeError,
+    canonical_latex_project_diagnostic,
     parse_canonical_latex_project,
     prepare_canonical_latex_project,
 )
@@ -103,6 +123,22 @@ __all__ = list(_model_all) + [
     "preflight_latex_project_candidate",
     "preflight_latex_project_candidates",
     "set_candidate_latex_project_root",
+    "LATEX_PROJECT_LOGS_DIRNAME",
+    "LATEX_PROJECT_PROVENANCE_FILENAME",
+    "LATEX_PROJECT_PROVENANCE_SCHEMA_VERSION",
+    "PROJECT_STATUS_COMPILED",
+    "PROJECT_STATUS_COMPILATION_FAILED",
+    "PROJECT_STATUS_INTEGRITY_FAILED",
+    "PROJECT_STATUS_ROOT_RESOLVED",
+    "LatexProjectCompilationAttempt",
+    "LatexProjectProvenanceState",
+    "append_compilation_attempt",
+    "load_latex_project_provenance",
+    "provenance_diagnostic_payload",
+    "provenance_path",
+    "reusable_compiled_pdf",
+    "save_latex_project_provenance",
+    "state_with_resolution",
     "ARCHIVE_METADATA_FILENAME",
     "DEFAULT_IGNORED_DIRECTORY_NAMES",
     "DEFAULT_IGNORED_METADATA_NAMES",
@@ -129,6 +165,7 @@ __all__ = list(_model_all) + [
     "LatexProjectPreparedContext",
     "LatexProjectRootResolutionRequiredError",
     "LatexProjectWrittenBridgeError",
+    "canonical_latex_project_diagnostic",
     "LatexProjectError",
     "LatexProjectIngestionConfig",
     "LatexProjectIntegrityError",

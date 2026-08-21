@@ -135,6 +135,7 @@ def parse_canonical_submission(
     compiler_options: Optional[Dict[str, Any]] = None,
     latex_project_root: Optional[str] = None,
     latex_project_config: Optional[LatexProjectIngestionConfig] = None,
+    latex_project_force_recompile: bool = False,
     accommodation_mode: bool = False,
     render_dir: Optional[str] = None,
     render_dpi: int = DEFAULT_RENDER_DPI,
@@ -267,6 +268,7 @@ def parse_canonical_submission(
             pdf_options=pdf_options,
             min_text_chars_per_page=min_text_chars_per_page,
             evidence_dir=evidence_dir,
+            force_recompile=latex_project_force_recompile,
         )
 
     elif route.handler == HANDLER_PDF_ACCOMMODATION:

@@ -1715,6 +1715,7 @@ class RubricGrader(QMainWindow):
             parent=self,
         )
         dialog.imports_committed.connect(self._on_canonical_imports_committed)
+        dialog.evidence_recovered.connect(self._on_canonical_evidence_recovered)
         dialog.exec_()
 
     def _on_canonical_imports_committed(self, payload):
@@ -1778,6 +1779,42 @@ class RubricGrader(QMainWindow):
             message += f" · {len(parse_errors)} evidence preparation warning(s)"
         self.status_bar.show_temporary_message(message)
         self._refresh_programming_workspace()
+
+    def _on_canonical_evidence_recovered(self, submission, parsed):
+        """Register safely regenerated LaTeX-project grading evidence."""
+        if submission is None or parsed is None:
+            return
+        repository = self.submission_controller.submission_repository
+        assessment_id = self._canonical_assessment_id()
+        if repository is None or not assessment_id:
+            return
+        active = repository.get_active_submission(assessment_id, submission.student_id)
+        if active is None or active.submission_id != submission.submission_id:
+            return
+        self.submission_controller.set_active_canonical_submission(
+            submission.student_id,
+            submission.submission_id,
+            assessment_id=assessment_id,
+        )
+        self.submission_controller.register_canonical_submission(
+            submission,
+            parsed=parsed,
+            replace=True,
+        )
+        active_student = self._active_submission_student_id()
+        if active_student:
+            try:
+                canonical = self.submission_controller.canonical_student_id(active_student)
+            except ValueError:
+                canonical = None
+            if canonical == submission.student_id:
+                self.submission_controller.activate_student(canonical, load_persisted=False)
+                self.current_submission = parsed
+                self._notify_submission_context_changed()
+        self.status_bar.show_temporary_message(
+            "Regenerated verified LaTeX-project grading evidence for %s"
+            % submission.student_id
+        )
 
     def show_submission_history(self):
         """Show immutable canonical attempts for the current student."""
@@ -4785,4 +4822,3 @@ class RubricGrader(QMainWindow):
                 "Error",
                 f"Failed to open Master ABET Evidence export dialog:\n{str(e)}",
             )
-

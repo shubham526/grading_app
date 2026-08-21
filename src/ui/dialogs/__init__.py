@@ -10,9 +10,11 @@ from .abet_dialogs import ABETMappingDialog, ABETReportDialog
 from .submission_history_dialog import SubmissionHistoryDialog
 from .submission_import_dialog import SubmissionImportDialog
 from .latex_project_root_dialog import LatexProjectRootSelectionDialog
+from .latex_project_diagnostics_dialog import LatexProjectDiagnosticsDialog
 
 __all__ = [
     "LatexProjectRootSelectionDialog",
+    "LatexProjectDiagnosticsDialog",
     "AutogradingSetupDialog",
     "AutogradingResultsDialog",
     "AutogradingHistoryDialog",

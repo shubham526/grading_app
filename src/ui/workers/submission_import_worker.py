@@ -30,9 +30,16 @@ from src.submissions import (
     parse_canonical_submission,
     route_submission,
 )
+from src.submissions.domain import (
+    ARTIFACT_TYPE_LATEX_PROJECT_ZIP,
+    ARTIFACT_TYPE_ZIP,
+)
 from src.submissions.latex_project import (
     LATEX_PROJECT_ROOT_METADATA_KEY,
+    LatexProjectCompilationFailedError,
+    LatexProjectIntegrityError,
     LatexProjectRootResolutionRequiredError,
+    canonical_latex_project_diagnostic,
     apply_latex_project_preview_validation,
     preflight_latex_project_candidates,
 )
@@ -44,6 +51,7 @@ class SubmissionImportOperation(str, Enum):
     DISCOVER_FILES = "discover_files"
     DISCOVER_DIRECTORY = "discover_directory"
     COMMIT = "commit"
+    RECOVER_LATEX_PROJECT = "recover_latex_project"
 
 
 def new_import_request_id() -> str:
@@ -154,6 +162,8 @@ class SubmissionImportWorker(QRunnable):
             return self._discover_directory()
         if self.operation == SubmissionImportOperation.COMMIT:
             return self._commit()
+        if self.operation == SubmissionImportOperation.RECOVER_LATEX_PROJECT:
+            return self._recover_latex_project()
         raise AssertionError(f"Unhandled import operation: {self.operation!r}")
 
     def _importer(self) -> SubmissionImporter:
@@ -217,6 +227,43 @@ class SubmissionImportWorker(QRunnable):
             "source_kind": "directory",
             "directory": directory,
         }
+
+    @staticmethod
+    def _latex_project_zip_artifact(submission: Submission):
+        values = [
+            artifact
+            for artifact in submission.artifacts
+            if artifact.artifact_type
+            in {ARTIFACT_TYPE_ZIP, ARTIFACT_TYPE_LATEX_PROJECT_ZIP}
+        ]
+        return values[0] if len(values) == 1 else None
+
+    def _latex_project_diagnostic(
+        self,
+        submission: Submission,
+        error: BaseException,
+        *,
+        candidate_paths: Sequence[str] = (),
+        root_relative_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        artifact = self._latex_project_zip_artifact(submission)
+        if artifact is None:
+            return {
+                "status": "invalid_project",
+                "error_code": "latex_project_zip_missing",
+                "error_message": str(error),
+                "recoverable": False,
+                "candidate_paths": list(candidate_paths),
+                "root_relative_path": root_relative_path,
+            }
+        return canonical_latex_project_diagnostic(
+            submission,
+            self.repository,
+            artifact,
+            error=error,
+            candidate_paths=candidate_paths,
+            root_relative_path=root_relative_path,
+        )
 
     def _commit(self) -> Dict[str, Any]:
         candidates = self.parameters.get("candidates") or []
@@ -318,6 +365,7 @@ class SubmissionImportWorker(QRunnable):
         parse_errors: Dict[str, str] = {}
         handler_pending: Dict[str, str] = {}
         root_resolution_required: Dict[str, Dict[str, Any]] = {}
+        latex_project_diagnostics: Dict[str, Dict[str, Any]] = {}
 
         affected_students = sorted({item.student_id for item in submissions})
         for student_id in affected_students:
@@ -361,6 +409,17 @@ class SubmissionImportWorker(QRunnable):
                     "status": exc.resolution.status,
                     "message": str(exc),
                 }
+                latex_project_diagnostics[student_id] = self._latex_project_diagnostic(
+                    active,
+                    exc,
+                    candidate_paths=exc.resolution.candidate_paths,
+                )
+            except (LatexProjectCompilationFailedError, LatexProjectIntegrityError) as exc:
+                latex_project_diagnostics[student_id] = self._latex_project_diagnostic(
+                    active,
+                    exc,
+                    root_relative_path=selected_root,
+                )
             except (SubmissionHandlerUnavailableError, ExplicitAccommodationRequiredError) as exc:
                 handler_pending[student_id] = str(exc)
             except Exception as exc:
@@ -374,6 +433,63 @@ class SubmissionImportWorker(QRunnable):
             "parse_errors": parse_errors,
             "handler_pending": handler_pending,
             "root_resolution_required": root_resolution_required,
+            "latex_project_diagnostics": latex_project_diagnostics,
+        }
+
+
+    def _recover_latex_project(self) -> Dict[str, Any]:
+        student_id = str(self.parameters.get("student_id") or "").strip()
+        if not student_id:
+            raise ValueError("student_id is required")
+        root_relative_path = str(
+            self.parameters.get("root_relative_path") or ""
+        ).strip() or None
+        question_ids = self.parameters.get("question_ids")
+        evidence_dir = self.parameters.get("evidence_dir")
+
+        active = self.repository.get_active_submission(self.assessment_id, student_id)
+        if active is None:
+            raise ValueError("No active canonical submission for %s" % student_id)
+        artifact = self._latex_project_zip_artifact(active)
+        if artifact is None:
+            raise ValueError("Active submission is not a canonical LaTeX project")
+
+        self._emit_progress("Re-verifying LaTeX project evidence for %s…" % student_id)
+        try:
+            parsed = parse_canonical_submission(
+                active,
+                self.repository,
+                question_ids,
+                compile_pdf=True,
+                latex_project_root=root_relative_path,
+                latex_project_force_recompile=True,
+                accommodation_mode=False,
+                evidence_dir=(str(evidence_dir) if evidence_dir else None),
+            )
+            return {
+                "student_id": student_id,
+                "submission": active,
+                "parsed_by_student": {student_id: parsed},
+                "latex_project_diagnostics": {},
+            }
+        except LatexProjectRootResolutionRequiredError as exc:
+            diagnostic = self._latex_project_diagnostic(
+                active,
+                exc,
+                candidate_paths=exc.resolution.candidate_paths,
+                root_relative_path=root_relative_path,
+            )
+        except (LatexProjectCompilationFailedError, LatexProjectIntegrityError) as exc:
+            diagnostic = self._latex_project_diagnostic(
+                active,
+                exc,
+                root_relative_path=root_relative_path,
+            )
+        return {
+            "student_id": student_id,
+            "submission": active,
+            "parsed_by_student": {},
+            "latex_project_diagnostics": {student_id: diagnostic},
         }
 
 
