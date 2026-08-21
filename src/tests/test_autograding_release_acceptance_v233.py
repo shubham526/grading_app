@@ -18,6 +18,7 @@ from src.autograding.models import ExecutionEnvironment, ExecutionResult, TestRe
 from src.autograding.scoring import score_pytest_run
 from src.autograding.testing.protocol import PytestRunResult
 from src.autograding.testing.pytest_adapter import student_safe_pytest_summary
+from src.tests.autograding_v233_release_fixture_support import write_release_fixture
 from src.tests.autograding_v233_service_support import (
     ASSESSMENT_ID as SERVICE_ASSESSMENT_ID,
     STUDENT_ID as SERVICE_STUDENT_ID,
@@ -25,13 +26,18 @@ from src.tests.autograding_v233_service_support import (
 )
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FIXTURE_ROOT = _REPO_ROOT / "fixtures" / "v2.3.3_autograding_acceptance"
-
-
 class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
+    def setUp(self):
+        self._fixture_temp = tempfile.TemporaryDirectory()
+        self.fixture_root = write_release_fixture(
+            Path(self._fixture_temp.name) / "v2.3.3_autograding_acceptance"
+        )
+
+    def tearDown(self):
+        self._fixture_temp.cleanup()
+
     def _fixture_expected(self):
-        return json.loads((_FIXTURE_ROOT / "EXPECTED_RESULTS.json").read_text(encoding="utf-8"))
+        return json.loads((self.fixture_root / "EXPECTED_RESULTS.json").read_text(encoding="utf-8"))
 
     def _synthetic_run(self, config, statuses):
         environment = ExecutionEnvironment(
@@ -88,8 +94,8 @@ class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
         )
 
     def test_permanent_fixture_manifest_and_required_files_are_self_consistent(self):
-        self.assertTrue(_FIXTURE_ROOT.is_dir())
-        manifest_path = _FIXTURE_ROOT / "MANIFEST.txt"
+        self.assertTrue(self.fixture_root.is_dir())
+        manifest_path = self.fixture_root / "MANIFEST.txt"
         entries = {}
         for line in manifest_path.read_text(encoding="utf-8").splitlines()[2:]:
             if not line.strip():
@@ -98,18 +104,18 @@ class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
             entries[relative] = digest
 
         expected_paths = {
-            str(path.relative_to(_FIXTURE_ROOT))
-            for path in _FIXTURE_ROOT.rglob("*")
+            str(path.relative_to(self.fixture_root))
+            for path in self.fixture_root.rglob("*")
             if path.is_file() and path.name != "MANIFEST.txt"
         }
         self.assertEqual(set(entries), expected_paths)
         for relative, expected_digest in entries.items():
-            actual = hashlib.sha256((_FIXTURE_ROOT / relative).read_bytes()).hexdigest()
+            actual = hashlib.sha256((self.fixture_root / relative).read_bytes()).hexdigest()
             self.assertEqual(actual, expected_digest, relative)
 
     def test_release_fixture_bundle_validates_and_matches_expected_contract(self):
         bundle = validate_test_bundle(
-            _FIXTURE_ROOT / "autograder_bundle",
+            self.fixture_root / "autograder_bundle",
             expected_assessment_id="V233_AUTO1",
         )
         self.assertEqual(bundle.config.assessment_id, "V233_AUTO1")
@@ -125,7 +131,7 @@ class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
         )
 
     def test_release_fixture_sources_have_expected_syntax_profile(self):
-        submissions = _FIXTURE_ROOT / "submissions"
+        submissions = self.fixture_root / "submissions"
         for student_id in ("aaron", "alice", "bob", "dave"):
             source = (submissions / student_id / "main.py").read_text(encoding="utf-8")
             compile(source, str(submissions / student_id / "main.py"), "exec")
@@ -138,7 +144,7 @@ class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
     def test_expected_release_fixture_scores_match_commit7_policy(self):
         expected = self._fixture_expected()
         bundle = validate_test_bundle(
-            _FIXTURE_ROOT / "autograder_bundle",
+            self.fixture_root / "autograder_bundle",
             expected_assessment_id=expected["assessment_id"],
         )
         for student_id in ("aaron", "alice", "bob", "carol", "dave"):
@@ -151,7 +157,7 @@ class TestAutogradingReleaseAcceptanceV233(unittest.TestCase):
     def test_student_safe_release_summary_redacts_hidden_identity_and_diagnostics(self):
         expected = self._fixture_expected()
         bundle = validate_test_bundle(
-            _FIXTURE_ROOT / "autograder_bundle",
+            self.fixture_root / "autograder_bundle",
             expected_assessment_id=expected["assessment_id"],
         )
         run = self._synthetic_run(bundle.config, expected["students"]["bob"]["statuses"])
